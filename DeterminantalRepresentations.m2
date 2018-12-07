@@ -113,6 +113,61 @@ isMajorized (RR, List, List) := Boolean => (eps, v, w) -> (
     all(#v, k -> clean(eps, sum(v_{0..k}) - sum(w_{0..k})) >= 0)
 )
 
+
+makeOrthostochasticMatrix = method()
+makeOrthostochasticMatrix RingElement := Matrix => f -> (
+    R := ring f;
+    R1 := (coefficientRing R)[R_0];
+    R2 := (coefficientRing R)[R_1];
+    f1 := sub(sub(f, R_1 => 0), R1);
+    f2 := sub(sub(f, R_0 => 0), R2);
+    r1 := roots(f1);
+    r2 := roots(f2);
+    D1 := reverse sort(apply(r1,r -> -1/r) | toList(3-#r1:0));
+    D2 := reverse sort(apply(r2,r -> -1/r) | toList(3-#r2:0));
+    d := #D1;
+    if not all(D1 | D2, r -> clean((10.0)^(-n), imaginaryPart r) == 0) then (
+	print("Not a real zero polynomial - no determinantal representation of size " | d);
+	return;
+    );
+    (D1, D2) = (D1/realPart, D2/realPart);
+    C1 := last coefficients(f, Monomials => apply(d, i -> R_{1,i}));
+    G1 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D2_s))), RR);
+    diag1 := solve(G1, sub(C1,RR));
+    if not isMajorized((10.0)^(-n), D1,flatten entries diag1) then (
+	print(toString(D1) | " is not majorized by " | toString(diag1));
+	return;
+    );
+    C2 := last coefficients(f, Monomials => apply(d, i -> R_{i,1}));
+    G2 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D1_s))), RR);
+    diag2 := solve(G2,sub(C2,RR));
+    if not isMajorized((10.0)^(-n), D2,flatten entries diag2) then (
+	print(toString(D2) | " is not majorized by " | toString(diag2));
+	return;
+    );
+    D1 = transpose matrix{D1};
+    D2 = transpose matrix{D2};
+     
+    R:=RR[q11,q12,q21,q22];
+    q11=(diag2_(0,0)-D2_(2,0)-q12*(D2_(1,0)-D2_(2,0)))/(D2_(0,0)-D2_(2,0))
+    q21=(-(D1_(0,0)-D1_(2,0))*(diag2_(0,0)-D2_(2,0)-q12*(D2_(1,0)-D2_(2,0)))+(D2_(0,0)-D2_(2,0))*(diag1_(0,0)-D1_(1,0)))/((D1_(1,0)-D1_(2,0))*(D2_(0,0)-D2_(2,0)))
+    q22=(diag1_(0,0)-D1_(2,0)-q12*(D1_(0,0)-D1_(2,0)))/(D1_(1,0)-D2_(2,0))
+    
+    
+    
+    
+    y := symbol y;
+    T := RR[y_0..y_(d^2-1)];
+    A := genericMatrix(T,d,d);
+    L := minors(1, (transpose A)*D1-diag1)+minors(1, A*D2-diag2);
+    allOnes := transpose matrix{apply(d, i -> 1_T)};
+    rowsum := minors(1, A*allOnes - allOnes);
+    colsum := minors(1, (transpose A)*allOnes - allOnes);
+    
+)
+
+
+
 --Compute Generalized Mixed discriminant of matrices
 
 generalizedMixedDiscriminant = method()
