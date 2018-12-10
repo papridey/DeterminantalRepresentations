@@ -18,7 +18,8 @@ export {
     "quadraticDetRep",
     "makeOrthogonalMatrix",
     "generalizedMixedDiscriminant",
-    "roundMatrix"
+    "roundMatrix",
+    "orthogonalFromOrthostochastic"
 }
 
 
@@ -115,7 +116,7 @@ isMajorized (RR, List, List) := Boolean => (eps, v, w) -> (
 
 
 makeOrthostochasticMatrix = method()
-makeOrthostochasticMatrix RingElement := Matrix => f -> (
+makeOrthostochasticMatrix (ZZ, RingElement) := Matrix => (n, f) -> (
     R := ring f;
     R1 := (coefficientRing R)[R_0];
     R2 := (coefficientRing R)[R_1];
@@ -145,13 +146,17 @@ makeOrthostochasticMatrix RingElement := Matrix => f -> (
 	print(toString(D2) | " is not majorized by " | toString(diag2));
 	return;
     );
-    D1 = transpose matrix{D1};
-    D2 = transpose matrix{D2};
-     
-    R:=RR[q11,q12,q21,q22];
-    q11=(diag2_(0,0)-D2_(2,0)-q12*(D2_(1,0)-D2_(2,0)))/(D2_(0,0)-D2_(2,0))
-    q21=(-(D1_(0,0)-D1_(2,0))*(diag2_(0,0)-D2_(2,0)-q12*(D2_(1,0)-D2_(2,0)))+(D2_(0,0)-D2_(2,0))*(diag1_(0,0)-D1_(1,0)))/((D1_(1,0)-D1_(2,0))*(D2_(0,0)-D2_(2,0)))
-    q22=(diag1_(0,0)-D1_(2,0)-q12*(D1_(0,0)-D1_(2,0)))/(D1_(1,0)-D2_(2,0))
+    D1 = sub(transpose matrix{D1},RR);
+    D2 = sub(transpose matrix{D2},RR);
+    
+    q12 := symbol q12;
+    S:=RR[q12];
+    q11:=(diag2_(0,0)-D2_(2,0)-q12*(D2_(1,0)-D2_(2,0)))/(D2_(0,0)-D2_(2,0));
+    q21:=(-(D1_(0,0)-D1_(2,0))*(diag2_(0,0)-D2_(2,0)-q12*(D2_(1,0)-D2_(2,0)))+(D2_(0,0)-D2_(2,0))*(diag1_(0,0)-D1_(2,0)))/((D1_(1,0)-D1_(2,0))*(D2_(0,0)-D2_(2,0)));
+    q22:=(diag1_(1,0)-D1_(2,0)-q12*(D1_(0,0)-D1_(2,0)))/(D1_(1,0)-D1_(2,0));
+    rootsCubic := roots((1 - q11 - q22 - q12 - q21 + q11*q22 + q12*q21)^2 - 4*q11*q22*q12*q21);
+    
+    
     
     
     
@@ -166,7 +171,14 @@ makeOrthostochasticMatrix RingElement := Matrix => f -> (
     
 )
 
-
+orthogonalFromOrthostochastic = method()
+orthogonalFromOrthostochastic (RR, Matrix) := List => (eps, M) -> (
+    N := matrix table(numrows M, numcols M, (i,j) -> sqrt(M_(i,j)));
+    d := numrows M;
+    sgn := toList((set{1,-1}) ^** d)/deepSplice/toList/diagonalMatrix;
+    return flatten table(sgn, sgn, (D1,D2) -> D1*N*D2);
+    select(apply(sgn, D -> D*N), O -> clean(eps, O*transpose O - id_((ring O)^d)) == 0)
+)
 
 --Compute Generalized Mixed discriminant of matrices
 
@@ -240,6 +252,11 @@ B = sub(transpose genericMatrix(coefficientRing R,b_(1,1),n,n), R)
 C = sub(transpose genericMatrix(coefficientRing R,c_(1,1),n,n), R)
 P = det(id_(R^n) + x_1*A + x_2*B + x_3*C);
 assert((last coefficients(P, Monomials => {x_1^3*x_2^2*x_3}))_(0,0) == generalizedMixedDiscriminant({A,A,A,B,B,C}))
+///
+
+TEST ///
+M = matrix{{0.5322,0.3711,0.0967},{0.4356,0.2578,0.3066},{0.0322,0.3711,0.5967}}
+orthogonalFromOrthostochastic M
 ///
 
 
