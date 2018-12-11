@@ -1,7 +1,7 @@
 newPackage("DeterminantalRepresentations",
 	AuxiliaryFiles => false,
-	Version => "0.0.1",
-	Date => "December 5, 2018",
+	Version => "0.0.2",
+	Date => "December 11, 2018",
 	Authors => {
 		{Name => "Justin Chen",
 		Email => "jchen646@gatech.edu"},
@@ -11,17 +11,19 @@ newPackage("DeterminantalRepresentations",
 	Headline => "a package for computing determinantal representations",
 	HomePage => "https://github.com/jchen419/DeterminantalRepresentations-M2",
 	PackageImports => {"NumericalAlgebraicGeometry"},
-	PackageExports => {"NumericalAlgebraicGeometry"},
-	DebuggingMode => true
+	DebuggingMode => true,
+        Reload => true
 )
 export {
     "quadraticDetRep",
-    "makeOrthogonalMatrix",
+    "cubicBivariateOrthostochastic",
+    "bivariateOrthogonal",
     "generalizedMixedDiscriminant",
     "roundMatrix",
     "orthogonalFromOrthostochastic"
 }
 
+-- Quadratic case
 
 quadraticDetRep = method()
 quadraticDetRep RingElement := List => f -> (
@@ -43,39 +45,23 @@ quadraticDetRep RingElement := List => f -> (
     apply(n, i -> matrix{{r_(i,0),t_(i,0) - ii*u_(i,0)},{t_(i,0)+ii*u_(i,0),s_(i,0)}})
 )
 
-makeOrthogonalMatrix = method()
-makeOrthogonalMatrix (ZZ, RingElement) := Matrix => (n, f) -> (
-    R := ring f;
-    R1 := (coefficientRing R)[R_0];
-    R2 := (coefficientRing R)[R_1];
-    f1 := sub(sub(f, R_1 => 0), R1);
-    f2 := sub(sub(f, R_0 => 0), R2);
-    r1 := roots(f1);
-    r2 := roots(f2);
-    D1 := reverse sort(apply(r1,r -> -1/r) | toList(3-#r1:0));
-    D2 := reverse sort(apply(r2,r -> -1/r) | toList(3-#r2:0));
-    d := #D1;
-    if not all(D1 | D2, r -> clean((10.0)^(-n), imaginaryPart r) == 0) then (
-	print("Not a real zero polynomial - no determinantal representation of size " | d);
-	return;
-    );
-    (D1, D2) = (D1/realPart, D2/realPart);
-    C1 := last coefficients(f, Monomials => apply(d, i -> R_{1,i}));
-    G1 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D2_s))), RR);
-    diag1 := solve(G1, sub(C1,RR));
-    if not isMajorized((10.0)^(-n), D1,flatten entries diag1) then (
-	print(toString(D1) | " is not majorized by " | toString(diag1));
-	return;
-    );
-    C2 := last coefficients(f, Monomials => apply(d, i -> R_{i,1}));
-    G2 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D1_s))), RR);
-    diag2 := solve(G2,sub(C2,RR));
-    if not isMajorized((10.0)^(-n), D2,flatten entries diag2) then (
-	print(toString(D2) | " is not majorized by " | toString(diag2));
-	return;
-    );
-    D1 = transpose matrix{D1};
-    D2 = transpose matrix{D2};
+-- Cubic case
+
+cubicBivariateOrthostochastic = method(Options => {Tolerance => 1e-6})
+cubicBivariateOrthostochastic RingElement := List => opts -> f -> (
+    (D1, D2, diag1, diag2) := bivariateDiagEntries(f, opts);
+    S := RR[getSymbol "q12"];
+    q11 := (diag2_(0,0)-D2_(2,0)-S_0*(D2_(1,0)-D2_(2,0)))/(D2_(0,0)-D2_(2,0));
+    q21 := (-(D1_(0,0)-D1_(2,0))*(diag2_(0,0)-D2_(2,0)-S_0*(D2_(1,0)-D2_(2,0)))+(D2_(0,0)-D2_(2,0))*(diag1_(0,0)-D1_(2,0)))/((D1_(1,0)-D1_(2,0))*(D2_(0,0)-D2_(2,0)));
+    q22 := (diag1_(1,0)-D1_(2,0)-S_0*(D1_(0,0)-D1_(2,0)))/(D1_(1,0)-D1_(2,0));
+    Q := matrix{{q11, S_0, 1 - S_0 - q11}, {q21, q22, 1 - q21 - q22}, {1 - q11 - q21, 1 - S_0 - q22, 1 - (1 - S_0 - q11) - (1 - q21 - q22)}};
+    apply(roots((1 - q11 - q22 - S_0 - q21 + q11*q22 + S_0*q21)^2 - 4*q11*q22*S_0*q21), r -> sub(Q, S_0 => r))
+)
+
+bivariateOrthogonal = method(Options => {Tolerance => 1e-6})
+bivariateOrthogonal RingElement := List => opts -> f -> (
+    (D1, D2, diag1, diag2) := bivariateDiagEntries(f, opts);
+    d := first degree f;
     y := symbol y;
     T := RR[y_0..y_(d^2-1)];
     A := genericMatrix(T,d,d);
@@ -87,12 +73,10 @@ makeOrthogonalMatrix (ZZ, RingElement) := Matrix => (n, f) -> (
     print "Computing orthogonal matrices numerically ...";
     elapsedTime N := numericalIrreducibleDecomposition(J, Software => BERTINI);
     rawPts := apply(N#0, W -> matrix pack(d,W#Points#0#Coordinates));
-    select(rawPts/clean_((10.0)^(-n)), M -> unique(flatten entries M/imaginaryPart) == {0_RR})
+    select(rawPts/clean_(opts.Tolerance), M -> unique(flatten entries M/imaginaryPart) == {0_RR})
 )
-makeOrthogonalMatrix RingElement := Matrix => f -> makeOrthogonalMatrix(5, f)
 
-
--- Helper functions for makeOrthogonalMatrix
+-- Helper functions for bivariate case
 
 makeUvector = method()
 makeUvector (List, ZZ) := List => (D, k) -> (
@@ -107,16 +91,15 @@ makeUComp (List, ZZ, ZZ) := List => (D, k, k') -> (
     transpose matrix{apply(Nk1, s -> sum flatten((select(Nk, t -> #((set t)*(set s)) == 0))/(S -> product(D_S))))}
 )
 
-isMajorized = method()
-isMajorized (RR, List, List) := Boolean => (eps, v, w) -> (
+isMajorized = method(Options => {Tolerance => 1e-6})
+isMajorized (List, List) := Boolean => opts -> (v, w) -> (
     (v,w) = (v,w)/rsort;
-    if not clean(eps, sum v - sum w) == 0 then return false;
-    all(#v, k -> clean(eps, sum(v_{0..k}) - sum(w_{0..k})) >= 0)
+    if not clean(opts.Tolerance, sum v - sum w) == 0 then return false;
+    all(#v, k -> clean(opts.Tolerance, sum(v_{0..k}) - sum(w_{0..k})) >= 0)
 )
 
-
-makeOrthostochasticMatrix = method()
-makeOrthostochasticMatrix (ZZ, RingElement) := Matrix => (n, f) -> (
+bivariateDiagEntries = method(Options => {Tolerance => 1e-6})
+bivariateDiagEntries RingElement := Sequence => opts -> f -> (
     R := ring f;
     R1 := (coefficientRing R)[R_0];
     R2 := (coefficientRing R)[R_1];
@@ -127,58 +110,34 @@ makeOrthostochasticMatrix (ZZ, RingElement) := Matrix => (n, f) -> (
     D1 := reverse sort(apply(r1,r -> -1/r) | toList(3-#r1:0));
     D2 := reverse sort(apply(r2,r -> -1/r) | toList(3-#r2:0));
     d := #D1;
-    if not all(D1 | D2, r -> clean((10.0)^(-n), imaginaryPart r) == 0) then (
-	print("Not a real zero polynomial - no determinantal representation of size " | d);
-	return;
+    if not all(D1 | D2, r -> clean(opts.Tolerance, imaginaryPart r) == 0) then (
+	error("Not a real zero polynomial - no determinantal representation of size " | d);
     );
     (D1, D2) = (D1/realPart, D2/realPart);
     C1 := last coefficients(f, Monomials => apply(d, i -> R_{1,i}));
     G1 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D2_s))), RR);
     diag1 := solve(G1, sub(C1,RR));
-    if not isMajorized((10.0)^(-n), D1,flatten entries diag1) then (
-	print(toString(D1) | " is not majorized by " | toString(diag1));
-	return;
+    if not isMajorized(D1, flatten entries diag1, opts) then (
+	error(toString(D1) | " is not majorized by " | toString(diag1));
     );
     C2 := last coefficients(f, Monomials => apply(d, i -> R_{i,1}));
     G2 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D1_s))), RR);
     diag2 := solve(G2,sub(C2,RR));
-    if not isMajorized((10.0)^(-n), D2,flatten entries diag2) then (
-	print(toString(D2) | " is not majorized by " | toString(diag2));
-	return;
+    if not isMajorized(D2, flatten entries diag2, opts) then (
+	error(toString(D2) | " is not majorized by " | toString(diag2));
     );
-    D1 = sub(transpose matrix{D1},RR);
-    D2 = sub(transpose matrix{D2},RR);
-    
-    q12 := symbol q12;
-    S:=RR[q12];
-    q11:=(diag2_(0,0)-D2_(2,0)-q12*(D2_(1,0)-D2_(2,0)))/(D2_(0,0)-D2_(2,0));
-    q21:=(-(D1_(0,0)-D1_(2,0))*(diag2_(0,0)-D2_(2,0)-q12*(D2_(1,0)-D2_(2,0)))+(D2_(0,0)-D2_(2,0))*(diag1_(0,0)-D1_(2,0)))/((D1_(1,0)-D1_(2,0))*(D2_(0,0)-D2_(2,0)));
-    q22:=(diag1_(1,0)-D1_(2,0)-q12*(D1_(0,0)-D1_(2,0)))/(D1_(1,0)-D1_(2,0));
-    rootsCubic := roots((1 - q11 - q22 - q12 - q21 + q11*q22 + q12*q21)^2 - 4*q11*q22*q12*q21);
-    
-    
-    
-    
-    
-    
-    y := symbol y;
-    T := RR[y_0..y_(d^2-1)];
-    A := genericMatrix(T,d,d);
-    L := minors(1, (transpose A)*D1-diag1)+minors(1, A*D2-diag2);
-    allOnes := transpose matrix{apply(d, i -> 1_T)};
-    rowsum := minors(1, A*allOnes - allOnes);
-    colsum := minors(1, (transpose A)*allOnes - allOnes);
-    
+    (transpose matrix{D1}, transpose matrix{D2}, diag1, diag2)
 )
 
-orthogonalFromOrthostochastic = method()
-orthogonalFromOrthostochastic (RR, Matrix) := List => (eps, M) -> (
+orthogonalFromOrthostochastic = method(Options => {Tolerance => 1e-6})
+orthogonalFromOrthostochastic Matrix := List => opts -> M -> (
     N := matrix table(numrows M, numcols M, (i,j) -> sqrt(M_(i,j)));
     d := numrows M;
     sgn := toList((set{1,-1}) ^** d)/deepSplice/toList/diagonalMatrix;
     return flatten table(sgn, sgn, (D1,D2) -> D1*N*D2);
-    select(apply(sgn, D -> D*N), O -> clean(eps, O*transpose O - id_((ring O)^d)) == 0)
+    select(apply(sgn, D -> D*N), O -> clean(opts.Tolerance, O*transpose O - id_((ring O)^d)) == 0)
 )
+orthogonalFromOrthostochastic Matrix := List => M -> orthogonalFromOrthostochastic(1e-5,M)
 
 --Compute Generalized Mixed discriminant of matrices
 
@@ -203,9 +162,7 @@ roundMatrix = method() -- only accepts real matrices
 roundMatrix (ZZ, Matrix) := Matrix => (n, A) -> matrix table(numrows A, numcols A, (i,j) -> (round(n,0.0+A_(i,j)))^QQ)
 
 liftRealMatrix = method()
-liftRealMatrix Matrix := Matrix => A -> (
-    matrix table(numrows A, numcols A, (i,j) -> realPart A_(i,j))
-)
+liftRealMatrix Matrix := Matrix => A -> matrix table(numrows A, numcols A, (i,j) -> realPart A_(i,j))
 
 beginDocumentation()
 
@@ -234,6 +191,18 @@ matrixCoeffs = apply(quadraticDetRep f, A -> sub(liftRealMatrix A, R))
 assert(clean(1e-10, f - det(id_(R^2) + sum apply(#gens R, i -> matrixCoeffs#i*R_i))))
 ///
 
+TEST /// -- cubic case tests
+R=QQ[x1,x2]
+f=6*x1^3+36*x1^2*x2+11*x1^2+66*x1*x2^2+42*x1*x2+6*x1+36*x2^3+36*x2^2+11*x2+1
+orthostochasticMatrices = cubicBivariateOrthostochastic f
+orthogonalFromOrthostochastic first orthostochasticMatrices
+///
+
+TEST ///
+M = matrix{{0.5322,0.3711,0.0967},{0.4356,0.2578,0.3066},{0.0322,0.3711,0.5967}}
+orthogonalFromOrthostochastic M
+///
+
 TEST /// -- Generalized mixed discriminant tests
 n = 4
 R = QQ[a_(1,1)..a_(n,n),b_(1,1)..b_(n,n)][x_1,x_2]
@@ -252,11 +221,6 @@ B = sub(transpose genericMatrix(coefficientRing R,b_(1,1),n,n), R)
 C = sub(transpose genericMatrix(coefficientRing R,c_(1,1),n,n), R)
 P = det(id_(R^n) + x_1*A + x_2*B + x_3*C);
 assert((last coefficients(P, Monomials => {x_1^3*x_2^2*x_3}))_(0,0) == generalizedMixedDiscriminant({A,A,A,B,B,C}))
-///
-
-TEST ///
-M = matrix{{0.5322,0.3711,0.0967},{0.4356,0.2578,0.3066},{0.0322,0.3711,0.5967}}
-orthogonalFromOrthostochastic M
 ///
 
 
@@ -297,7 +261,7 @@ roots C
 
 R=QQ[x1,x2]
 f=6*x1^3+36*x1^2*x2+11*x1^2+66*x1*x2^2+42*x1*x2+6*x1+36*x2^3+36*x2^2+11*x2+1
-matrixList = makeOrthogonalMatrix f
+matrixList = bivariateOrthogonal f
 G = toList((set{1,-1}) ^** 3) /deepSplice/toList/diagonalMatrix
 Q1 = matrixList#0
 removeOneOrbit = select(matrixList, A -> not any(G, g -> clean(1e-10, A - g*Q1) == 0));
@@ -318,7 +282,7 @@ f = det(id_(R^3) + R_0*A1 + R_1*A2)
 -- Quartic examples
 R = QQ[x1,x2]
 f=(1/2)*(x1^4+x2^4-3*x1^2-3*x2^2+x1^2*x2^2)+1
-matrixList = makeOrthogonalMatrix f
+matrixList = bivariateOrthogonal f
 
 f=24*x1^4+(49680/289)*x1^3*x2+50*x1^3+(123518/289)*x1^2*x2^2+(72507/289)*x1^2*x2+35*x1^2+(124740/289)*x1*x2^3+(112402/289)*x1*x2^2+(32022/289)*x1*x2+10*x1+144*x2^4+180*x2^3+80*x2^2+15*x2+1
 
@@ -328,12 +292,7 @@ A2 = random(R^4,R^4)
 (A1,A2) = (A1 + transpose A1, A2 + transpose A2)
 f = det(id_(R^4) + R_0*A1 + R_1*A2)
 
--- Permutation test
-L = {1,1,2,2,2,3,3}
-unique permutations L
---7!//(2!*3!*2!)
-
--- makeOrthogonalMatrix test
+-- bivariateOrthogonal test
 
 U = QQ[a_(1,1)..a_(3,3)]
 L = ideal(a_(1,1)-(5-2*a_(1,2))/8, a_(1,3) - (3-6*a_(1,2))/8, a_(2,1) - (1+2*a_(1,2))/4, a_(2,2) - (1-2*a_(1,2)), a_(2,3) - (6*a_(1,2)-1)/4, a_(3,1) - (1-2*a_(1,2))/8, a_(3,3) - (7-6*a_(1,2))/8, a_(3,2) - a_(1,2))
