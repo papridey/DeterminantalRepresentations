@@ -18,22 +18,23 @@ export {
     "quadraticDetRep",
     "cubicBivariateOrthostochastic",
     "bivariateOrthogonal",
+    "quarticBivariateSystem",
     "generalizedMixedDiscriminant",
-    "roundMatrix",
-    "orthogonalFromOrthostochastic"
+    "orthogonalFromOrthostochastic",
+    "roundMatrix"
 }
 
 -- Quadratic case
 
-quadraticDetRep = method()
-quadraticDetRep RingElement := List => f -> (
+quadraticDetRep = method(Options => {Tolerance => 1e-6})
+quadraticDetRep RingElement := List => opts -> f -> ( -- returns a list of matrices over original ring R
     R := ring f;
     n := #gens R;
     b := sub(last coefficients(f, Monomials => gens R), RR);
     A := sub(matrix table(n, n, (i,j) -> if i == j then (last coefficients(f, Monomials => {R_i^2}))_(0,0) else (1/2)*(last coefficients(f, Monomials => {R_i*R_j}))_(0,0)), RR);
     Q := (1/4)*b*transpose(b) - A;
     E := eigenvectors(Q, Hermitian => true);
-    E = (E#0/clean_1e-10, E#1);
+    E = (E#0/clean_(opts.Tolerance), E#1);
     if not all(E#0, e -> e >= 0) then return false;
     if rank(Q) > 3 then return false;
     posEvalues := positions(E#0, e -> e > 0);
@@ -42,13 +43,16 @@ quadraticDetRep RingElement := List => f -> (
     s := (1/2)*b - sqrt(posEvectors#0#0)*posEvectors#0#1;
     t := sqrt(posEvectors#1#0)*posEvectors#1#1;
     u := if #posEvalues == 3 then sqrt(posEvectors#2#0)*posEvectors#2#1 else 0*b;
-    apply(n, i -> matrix{{r_(i,0),t_(i,0) - ii*u_(i,0)},{t_(i,0)+ii*u_(i,0),s_(i,0)}})
+    L := apply(n, i -> matrix{{r_(i,0),t_(i,0) - ii*u_(i,0)},{t_(i,0)+ii*u_(i,0),s_(i,0)}});
+    if not class ultimate (coefficientRing, R) === ComplexField then L = L/liftRealMatrix;
+    if ultimate (coefficientRing, R) === QQ then L = L/roundMatrix_(ceiling(log_10(1/opts.Tolerance)));
+    apply(L, M -> sub(M, R))
 )
 
 -- Cubic case
 
 cubicBivariateOrthostochastic = method(Options => {Tolerance => 1e-6})
-cubicBivariateOrthostochastic RingElement := List => opts -> f -> (
+cubicBivariateOrthostochastic RingElement := List => opts -> f -> ( -- returns a list of orthostochastic matrices
     (D1, D2, diag1, diag2) := bivariateDiagEntries(f, opts);
     S := RR[getSymbol "q12"];
     q11 := (diag2_(0,0)-D2_(2,0)-S_0*(D2_(1,0)-D2_(2,0)))/(D2_(0,0)-D2_(2,0));
@@ -59,7 +63,7 @@ cubicBivariateOrthostochastic RingElement := List => opts -> f -> (
 )
 
 bivariateOrthogonal = method(Options => {Tolerance => 1e-6})
-bivariateOrthogonal RingElement := List => opts -> f -> (
+bivariateOrthogonal RingElement := List => opts -> f -> ( -- returns a list of orthogonal matrices
     (D1, D2, diag1, diag2) := bivariateDiagEntries(f, opts);
     d := first degree f;
     y := symbol y;
@@ -74,6 +78,32 @@ bivariateOrthogonal RingElement := List => opts -> f -> (
     elapsedTime N := numericalIrreducibleDecomposition(J, Software => BERTINI);
     rawPts := apply(N#0, W -> matrix pack(d,W#Points#0#Coordinates));
     select(rawPts/clean_(opts.Tolerance), M -> unique(flatten entries M/imaginaryPart) == {0_RR})
+)
+
+
+-- Quartic case
+
+quarticBivariateSystem = method(Options => {Tolerance => 1e-6})
+quarticBivariateSystem RingElement := List => opts -> F -> (
+    (D1, D2, diag1, diag2) := bivariateDiagEntries(F, opts);
+    (a, b, c, d) := toSequence flatten entries diag2;
+    D := flatten entries diag1;
+    R := ring F;
+    C := flatten entries last coefficients(F, Monomials => {R_1^2, R_0*R_1^2, R_0^2*R_1^2, R_1^3, R_0*R_1^3, R_1^4});
+    T := RR[("e","f","g","h","k","l")/getSymbol];
+    (e,f,g,h,k,l) := toSequence gens T;
+    E := {a*b + a*c + a*d + b*c + b*d + c*d - e^2 - f^2 - g^2 - h^2 - k^2 - l^2,
+            D#0*(b*d + c*d + b*c) + D#1*(a*d + c*d + a*c) + D#2*(a*d + b*d + a*b) + D#3*(a*b + a*c + b*c) - e^2*(D#2 + D#3) - f^2*(D#1 + D#3) - g^2*(D#1 + D#2) - h^2*(D#0 + D#3) - k^2*(D#0 + D#2) - l^2*(D#0 + D#1),
+            D#0*D#1*(c*d - l^2) + D#0*D#2*(b*d - k^2) + D#0*D#3*(b*c - h^2) + D#2*D#3*(a*b - e^2) + D#1*D#2*(a*d - g^2) + D#1*D#3*(a*c - f^2),
+            (a*b*c + a*c*d + a*b*d + b*c*d) - e^2*(c+d) - f^2*(b+d) - g^2*(b+c) - h^2*(a+d) - k^2*(a+c) - l^2*(a+b) + 2*(h*k*l + f*g*l + e*g*k + e*f*h),
+            D#0*(b*c*d + 2*h*k*l) + D#1*(a*c*d + 2*f*g*l) + D#2*(a*b*d + 2*e*g*k) + D#3*(a*b*c + 2*e*f*h) - e^2*(D#2*d + D#3*c) - f^2*(D#1*d + D#3*b) - g^2*(D#1*c + D#2*b) - h^2*(D#3*a + D#0*d) - k^2*(D#2*a + D#0*c) - l^2*(D#0*b + D#1*a),
+            a*b*c*d - c*d*e^2 - b*d*f^2 - b*c*g^2 - a*d*h^2 - a*c*k^2 - a*b*l^2 + 2*(f*g*l*b + h*k*l*a + e*g*k*c + e*f*h*d) + e^2*l^2 + f^2*k^2 + g^2*h^2 - 2*(e*f*k*l + e*g*h*l + f*g*h*k)};
+    P := polySystem apply(#E, i -> E#i - sub(C#i, T));
+    print "Solving 6x6 system...";
+    time sols := select(solveSystem P, p -> not status p === RefinementFailure);
+    cleanPts := apply(sols, p -> point{p#Coordinates/clean_(opts.Tolerance)});
+    cleanPts
+    -- realPoints(cleanPts, Tolerance => opts.Tolerance)
 )
 
 -- Helper functions for bivariate case
@@ -99,14 +129,11 @@ isMajorized (List, List) := Boolean => opts -> (v, w) -> (
 )
 
 bivariateDiagEntries = method(Options => {Tolerance => 1e-6})
-bivariateDiagEntries RingElement := Sequence => opts -> f -> (
+bivariateDiagEntries RingElement := Sequence => opts -> f -> ( -- returns diagonal entries and eigenvalues of coefficient matrices
     R := ring f;
-    R1 := (coefficientRing R)[R_0];
-    R2 := (coefficientRing R)[R_1];
-    f1 := sub(sub(f, R_1 => 0), R1);
-    f2 := sub(sub(f, R_0 => 0), R2);
-    r1 := roots(f1);
-    r2 := roots(f2);
+    (R1, R2) := ((coefficientRing R)[R_0], (coefficientRing R)[R_1]);
+    (f1, f2) := (sub(sub(f, R_1 => 0), R1), sub(sub(f, R_0 => 0), R2));
+    (r1, r2) := (f1, f2)/roots;
     D1 := reverse sort(apply(r1,r -> -1/r) | toList(3-#r1:0));
     D2 := reverse sort(apply(r2,r -> -1/r) | toList(3-#r2:0));
     d := #D1;
@@ -137,7 +164,6 @@ orthogonalFromOrthostochastic Matrix := List => opts -> M -> (
     return flatten table(sgn, sgn, (D1,D2) -> D1*N*D2);
     select(apply(sgn, D -> D*N), O -> clean(opts.Tolerance, O*transpose O - id_((ring O)^d)) == 0)
 )
-orthogonalFromOrthostochastic Matrix := List => M -> orthogonalFromOrthostochastic(1e-5,M)
 
 --Compute Generalized Mixed discriminant of matrices
 
@@ -187,20 +213,18 @@ doc ///
 TEST /// -- Quadratic determinantal representation tests
 R = RR[x1,x2,x3]
 f = 1 - 8*x1*x2 - 4*x1*x3 - 100*x2^2 - 12*x2*x3 - x3^2 - 5*x1^2
-matrixCoeffs = apply(quadraticDetRep f, A -> sub(liftRealMatrix A, R))
-assert(clean(1e-10, f - det(id_(R^2) + sum apply(#gens R, i -> matrixCoeffs#i*R_i))))
+coeffMatrices = quadraticDetRep f
+assert(0 == clean(1e-10, f - det(id_(R^2) + sum apply(#gens R, i -> coeffMatrices#i*R_i))))
 ///
 
 TEST /// -- cubic case tests
 R=QQ[x1,x2]
 f=6*x1^3+36*x1^2*x2+11*x1^2+66*x1*x2^2+42*x1*x2+6*x1+36*x2^3+36*x2^2+11*x2+1
 orthostochasticMatrices = cubicBivariateOrthostochastic f
-orthogonalFromOrthostochastic first orthostochasticMatrices
-///
-
-TEST ///
+L1 = orthogonalFromOrthostochastic last orthostochasticMatrices
 M = matrix{{0.5322,0.3711,0.0967},{0.4356,0.2578,0.3066},{0.0322,0.3711,0.5967}}
-orthogonalFromOrthostochastic M
+L2 = orthogonalFromOrthostochastic M
+assert(all(L2, M -> any(L1, N -> 0 == clean(1e-4, N - M))))
 ///
 
 TEST /// -- Generalized mixed discriminant tests
@@ -215,12 +239,13 @@ assert((last coefficients(P, Monomials => {x_1^3*x_2}))_(0,0) == generalizedMixe
 
 TEST ///
 n = 3
-R = QQ[a_(1,1)..a_(n,n),b_(1,1)..b_(n,n),c_(1,1)..c_(n,n)][x_1,x_2,x_n]
+R = QQ[a_(1,1)..a_(n,n),b_(1,1)..b_(n,n),c_(1,1)..c_(n,n)][x_1..x_n]
 A = sub(transpose genericMatrix(coefficientRing R,n,n), R)
 B = sub(transpose genericMatrix(coefficientRing R,b_(1,1),n,n), R)
 C = sub(transpose genericMatrix(coefficientRing R,c_(1,1),n,n), R)
 P = det(id_(R^n) + x_1*A + x_2*B + x_3*C);
-assert((last coefficients(P, Monomials => {x_1^3*x_2^2*x_3}))_(0,0) == generalizedMixedDiscriminant({A,A,A,B,B,C}))
+assert((last coefficients(P, Monomials => {x_1*x_2*x_3}))_(0,0) == generalizedMixedDiscriminant({A,B,C}))
+-- assert((last coefficients(P, Monomials => {x_1^3*x_2^2*x_3}))_(0,0) == generalizedMixedDiscriminant({A,A,A,B,B,C})) -- these coefficients are 0
 ///
 
 
@@ -279,6 +304,12 @@ A2 = random(R^3,R^3)
 f = det(id_(R^3) + R_0*A1 + R_1*A2)
 
 
+-- Degenerate cubic
+R = QQ[x1,x2]
+f = 162*x1^3 - 23*x1^2*x2 + 99*x1^2 - 8*x1*x2^2 - 10*x1*x2 + 18*x1 + x2^3 - x2^2 - x2 + 1
+cubicBivariateOrthostochastic f
+
+
 -- Quartic examples
 R = QQ[x1,x2]
 f=(1/2)*(x1^4+x2^4-3*x1^2-3*x2^2+x1^2*x2^2)+1
@@ -291,6 +322,12 @@ A1 = random(R^4,R^4)
 A2 = random(R^4,R^4)
 (A1,A2) = (A1 + transpose A1, A2 + transpose A2)
 f = det(id_(R^4) + R_0*A1 + R_1*A2)
+
+
+R = RR[x,y]
+A = sub(random(ZZ^4,ZZ^4), R)
+f = det(id_(R^4) + x*sub(diagonalMatrix {1,2,3,4},R) + y*(A + transpose A))
+quarticBivariateSystem f -- gives no real solutions
 
 -- bivariateOrthogonal test
 
