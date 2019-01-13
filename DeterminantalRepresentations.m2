@@ -21,6 +21,7 @@ export {
     "quarticBivariateSystem",
     "generalizedMixedDiscriminant",
     "orthogonalFromOrthostochastic",
+    "bivariateDiagEntries",
     "roundMatrix"
 }
 
@@ -86,24 +87,35 @@ bivariateOrthogonal RingElement := List => opts -> f -> ( -- returns a list of o
 quarticBivariateSystem = method(Options => {Tolerance => 1e-6})
 quarticBivariateSystem RingElement := List => opts -> F -> (
     (D1, D2, diag1, diag2) := bivariateDiagEntries(F, opts);
-    (a, b, c, d) := toSequence flatten entries diag2;
-    D := flatten entries diag1;
+    D := flatten entries D1;
     R := ring F;
-    C := flatten entries last coefficients(F, Monomials => {R_1^2, R_0*R_1^2, R_0^2*R_1^2, R_1^3, R_0*R_1^3, R_1^4});
-    T := RR[("e","f","g","h","k","l")/getSymbol];
-    (e,f,g,h,k,l) := toSequence gens T;
-    E := {a*b + a*c + a*d + b*c + b*d + c*d - e^2 - f^2 - g^2 - h^2 - k^2 - l^2,
-            D#0*(b*d + c*d + b*c) + D#1*(a*d + c*d + a*c) + D#2*(a*d + b*d + a*b) + D#3*(a*b + a*c + b*c) - e^2*(D#2 + D#3) - f^2*(D#1 + D#3) - g^2*(D#1 + D#2) - h^2*(D#0 + D#3) - k^2*(D#0 + D#2) - l^2*(D#0 + D#1),
-            D#0*D#1*(c*d - l^2) + D#0*D#2*(b*d - k^2) + D#0*D#3*(b*c - h^2) + D#2*D#3*(a*b - e^2) + D#1*D#2*(a*d - g^2) + D#1*D#3*(a*c - f^2),
-            (a*b*c + a*c*d + a*b*d + b*c*d) - e^2*(c+d) - f^2*(b+d) - g^2*(b+c) - h^2*(a+d) - k^2*(a+c) - l^2*(a+b) + 2*(h*k*l + f*g*l + e*g*k + e*f*h),
-            D#0*(b*c*d + 2*h*k*l) + D#1*(a*c*d + 2*f*g*l) + D#2*(a*b*d + 2*e*g*k) + D#3*(a*b*c + 2*e*f*h) - e^2*(D#2*d + D#3*c) - f^2*(D#1*d + D#3*b) - g^2*(D#1*c + D#2*b) - h^2*(D#3*a + D#0*d) - k^2*(D#2*a + D#0*c) - l^2*(D#0*b + D#1*a),
-            a*b*c*d - c*d*e^2 - b*d*f^2 - b*c*g^2 - a*d*h^2 - a*c*k^2 - a*b*l^2 + 2*(f*g*l*b + h*k*l*a + e*g*k*c + e*f*h*d) + e^2*l^2 + f^2*k^2 + g^2*h^2 - 2*(e*f*k*l + e*g*h*l + f*g*h*k)};
-    P := polySystem apply(#E, i -> E#i - sub(C#i, T));
+    mons := matrix{{R_1^2, R_0*R_1^2, R_0^2*R_1^2, R_1^3, R_0*R_1^3, R_1^4}};
+    C := last coefficients(F, Monomials => mons);
+    e := getSymbol "e";
+    T := RR(monoid[e_1..e_(binomial(4,2))]);
+    S := T[gens R];
+    A := genericSkewMatrix(T, 4);
+    B := matrix table(4, 4, (i,j) -> if i == j then diag2_(i,0) else A_(min(i,j),max(i,j)));
+    -- B := matrix table(4, 4, (i,j) -> if i <= j then A_(i,j) else -A_(i,j)) + sub(diagonalMatrix diag2, T);
+    G := det(id_(S^4) + S_0*sub(diagonalMatrix D, S) + S_1*sub(B, S));
+    C1 := last coefficients(G, Monomials => sub(mons, S)) - sub(C, S);
+    P := polySystem sub(clean(opts.Tolerance, C1), T);
+    
+    -- (a, b, c, d) := toSequence flatten entries diag2;
+    -- C := flatten entries last coefficients(F, Monomials => mons);
+    -- T := RR[("e","f","g","h","k","l")/getSymbol];
+    -- (e,f,g,h,k,l) := toSequence gens T;
+    -- E := {a*b + a*c + a*d + b*c + b*d + c*d - e^2 - f^2 - g^2 - h^2 - k^2 - l^2,
+            -- D#0*(b*d + c*d + b*c) + D#1*(a*d + c*d + a*c) + D#2*(a*d + b*d + a*b) + D#3*(a*b + a*c + b*c) - e^2*(D#2 + D#3) - f^2*(D#1 + D#3) - g^2*(D#1 + D#2) - h^2*(D#0 + D#3) - k^2*(D#0 + D#2) - l^2*(D#0 + D#1),
+            -- D#0*D#1*(c*d - l^2) + D#0*D#2*(b*d - k^2) + D#0*D#3*(b*c - h^2) + D#2*D#3*(a*b - e^2) + D#1*D#2*(a*d - g^2) + D#1*D#3*(a*c - f^2),
+            -- (a*b*c + a*c*d + a*b*d + b*c*d) - e^2*(c+d) - f^2*(b+d) - g^2*(b+c) - h^2*(a+d) - k^2*(a+c) - l^2*(a+b) + 2*(h*k*l + f*g*l + e*g*k + e*f*h),
+            -- D#0*(b*c*d + 2*h*k*l) + D#1*(a*c*d + 2*f*g*l) + D#2*(a*b*d + 2*e*g*k) + D#3*(a*b*c + 2*e*f*h) - e^2*(D#2*d + D#3*c) - f^2*(D#1*d + D#3*b) - g^2*(D#1*c + D#2*b) - h^2*(D#3*a + D#0*d) - k^2*(D#2*a + D#0*c) - l^2*(D#0*b + D#1*a),
+            -- a*b*c*d - c*d*e^2 - b*d*f^2 - b*c*g^2 - a*d*h^2 - a*c*k^2 - a*b*l^2 + 2*(f*g*l*b + h*k*l*a + e*g*k*c + e*f*h*d) + e^2*l^2 + f^2*k^2 + g^2*h^2 - 2*(e*f*k*l + e*g*h*l + f*g*h*k)};
+    -- P := polySystem apply(#E, i -> E#i - sub(C#i, T));
+    
     print "Solving 6x6 system...";
     time sols := select(solveSystem P, p -> not status p === RefinementFailure);
-    cleanPts := apply(sols, p -> point{p#Coordinates/clean_(opts.Tolerance)});
-    cleanPts
-    -- realPoints(cleanPts, Tolerance => opts.Tolerance)
+    realPoints apply(sols, p -> point{p#Coordinates/clean_(opts.Tolerance)})
 )
 
 -- Helper functions for bivariate case
@@ -324,9 +336,16 @@ A2 = random(R^4,R^4)
 f = det(id_(R^4) + R_0*A1 + R_1*A2)
 
 
+clearAll
+R = RR[x,y];A = sub(diagonalMatrix{5,6,7,8},R);f = det(id_(R^4) + x*sub(diagonalMatrix {1,2,3,4},R) + y*A);
+
 R = RR[x,y]
+A = sub(diagonalMatrix{5,6,7,8},R)
+f = det(id_(R^4) + x*sub(diagonalMatrix {1,2,3,4},R) + y*A)
+quarticBivariateSystem f -- diagonal case
 A = sub(random(ZZ^4,ZZ^4), R)
 f = det(id_(R^4) + x*sub(diagonalMatrix {1,2,3,4},R) + y*(A + transpose A))
+f = det(id_(R^4) + x*sub(diagonalMatrix {4,3,2,1},R) + y*(A + transpose A))
 quarticBivariateSystem f -- gives no real solutions
 
 -- bivariateOrthogonal test
