@@ -1,7 +1,7 @@
 newPackage("DeterminantalRepresentations",
 	AuxiliaryFiles => false,
-	Version => "0.0.2",
-	Date => "December 11, 2018",
+	Version => "0.0.3",
+	Date => "January 19, 2019",
 	Authors => {
 		{Name => "Justin Chen",
 		Email => "jchen646@gatech.edu"},
@@ -9,8 +9,8 @@ newPackage("DeterminantalRepresentations",
 		Email => "papri_dey@brown.edu"}
 	},
 	Headline => "a package for computing determinantal representations",
-	HomePage => "https://github.com/jchen419/DeterminantalRepresentations-M2",
-	PackageImports => {"NumericalAlgebraicGeometry"},
+	HomePage => "https://github.com/papridey/DeterminantalRepresentations",
+	PackageExports => {"NumericalAlgebraicGeometry"},
 	DebuggingMode => true,
         Reload => true
 )
@@ -18,11 +18,12 @@ export {
     "quadraticDetRep",
     "cubicBivariateOrthostochastic",
     "bivariateOrthogonal",
-    "quarticBivariateSystem",
+    "bivariateSystem",
     "generalizedMixedDiscriminant",
     "orthogonalFromOrthostochastic",
     "bivariateDiagEntries",
-    "roundMatrix"
+    "roundMatrix",
+    "hadamard"
 }
 
 -- Quadratic case
@@ -36,26 +37,26 @@ quadraticDetRep RingElement := List => opts -> f -> ( -- returns a list of matri
     Q := (1/4)*b*transpose(b) - A;
     E := eigenvectors(Q, Hermitian => true);
     E = (E#0/clean_(opts.Tolerance), E#1);
-    if not all(E#0, e -> e >= 0) then return false;
-    if rank(Q) > 3 then return false;
+    if not all(E#0, e -> e >= 0) then ( print "Not all eigenvalues nonnegative!"; return false; );
+    if #select(E#0, e -> not(e == 0)) > 3 then ( print("Rank of matrix Q is " | rank(Q) | " (too large)!"); return false; );
     posEvalues := positions(E#0, e -> e > 0);
     posEvectors := apply(posEvalues, i -> (E#0#i,matrix E#1_i));
     r := (1/2)*b + sqrt(posEvectors#0#0)*posEvectors#0#1;
     s := (1/2)*b - sqrt(posEvectors#0#0)*posEvectors#0#1;
-    t := sqrt(posEvectors#1#0)*posEvectors#1#1;
+    t := if #posEvalues >= 2 then sqrt(posEvectors#1#0)*posEvectors#1#1 else 0*b;
     u := if #posEvalues == 3 then sqrt(posEvectors#2#0)*posEvectors#2#1 else 0*b;
     L := apply(n, i -> matrix{{r_(i,0),t_(i,0) - ii*u_(i,0)},{t_(i,0)+ii*u_(i,0),s_(i,0)}});
-    if not class ultimate (coefficientRing, R) === ComplexField then L = L/liftRealMatrix;
+    if not class ultimate (coefficientRing, R) === ComplexField then L = L/liftRealMatrix/clean_(opts.Tolerance);
     if ultimate (coefficientRing, R) === QQ then L = L/roundMatrix_(ceiling(log_10(1/opts.Tolerance)));
     apply(L, M -> sub(M, R))
 )
 
--- Cubic case
+-- Cubic bivariate case
 
-cubicBivariateOrthostochastic = method(Options => {Tolerance => 1e-6})
+cubicBivariateOrthostochastic = method(Options => options quadraticDetRep)
 cubicBivariateOrthostochastic RingElement := List => opts -> f -> ( -- returns a list of orthostochastic matrices
     (D1, D2, diag1, diag2) := bivariateDiagEntries(f, opts);
-    S := RR[getSymbol "q12"];
+    S := RR(monoid[getSymbol "q12"]);
     q11 := (diag2_(0,0)-D2_(2,0)-S_0*(D2_(1,0)-D2_(2,0)))/(D2_(0,0)-D2_(2,0));
     q21 := (-(D1_(0,0)-D1_(2,0))*(diag2_(0,0)-D2_(2,0)-S_0*(D2_(1,0)-D2_(2,0)))+(D2_(0,0)-D2_(2,0))*(diag1_(0,0)-D1_(2,0)))/((D1_(1,0)-D1_(2,0))*(D2_(0,0)-D2_(2,0)));
     q22 := (diag1_(1,0)-D1_(2,0)-S_0*(D1_(0,0)-D1_(2,0)))/(D1_(1,0)-D1_(2,0));
@@ -63,12 +64,35 @@ cubicBivariateOrthostochastic RingElement := List => opts -> f -> ( -- returns a
     apply(roots((1 - q11 - q22 - S_0 - q21 + q11*q22 + S_0*q21)^2 - 4*q11*q22*S_0*q21), r -> sub(Q, S_0 => r))
 )
 
-bivariateOrthogonal = method(Options => {Tolerance => 1e-6})
+orthogonalFromOrthostochastic = method(Options => options quadraticDetRep)
+orthogonalFromOrthostochastic Matrix := List => opts -> M -> (
+    if min(flatten entries M) < 0 then return {};
+    N := matrix apply(entries M, r -> r/sqrt);
+    d := numrows M;
+    sgn := toList((set{1,-1}) ^** (d-1))/deepSplice/toList;
+    row1 := transpose N^{0};
+    validRows := {{N^{0}}};
+    for i from 1 to numrows N-1 do (
+        for S in sgn do (
+            candidate := hadamard(matrix{{1} | S}, N^{i});
+            if clean(opts.Tolerance, candidate*row1) == 0 then (
+                validRows = append(validRows, {candidate});
+                break;
+            );
+        );
+    );
+    matrix validRows
+)
+
+-- General bivariate case 
+-- via orthogonal matrices
+
+bivariateOrthogonal = method(Options => {Tolerance => 1e-6, Software => M2engine})
 bivariateOrthogonal RingElement := List => opts -> f -> ( -- returns a list of orthogonal matrices
-    (D1, D2, diag1, diag2) := bivariateDiagEntries(f, opts);
+    (D1, D2, diag1, diag2) := bivariateDiagEntries(f, Tolerance => opts.Tolerance);
     d := first degree f;
-    y := symbol y;
-    T := RR[y_0..y_(d^2-1)];
+    y := getSymbol "y";
+    T := RR(monoid[y_0..y_(d^2-1)]);
     A := genericMatrix(T,d,d);
     L := minors(1, (transpose A)*D1-diag1)+minors(1, A*D2-diag2);
     allOnes := transpose matrix{apply(d, i -> 1_T)};
@@ -76,45 +100,32 @@ bivariateOrthogonal RingElement := List => opts -> f -> ( -- returns a list of o
     colsum := minors(1, (transpose A)*allOnes - allOnes);
     J := minors(1, A*transpose A - id_(T^d)) + sub(L + rowsum + colsum, apply(gens T, v -> v => v^2));
     print "Computing orthogonal matrices numerically ...";
-    elapsedTime N := numericalIrreducibleDecomposition(J, Software => BERTINI);
+    elapsedTime N := numericalIrreducibleDecomposition(J, Software => opts.Software);
     rawPts := apply(N#0, W -> matrix pack(d,W#Points#0#Coordinates));
     select(rawPts/clean_(opts.Tolerance), M -> unique(flatten entries M/imaginaryPart) == {0_RR})
 )
 
+-- via solving polynomial system numerically
 
--- Quartic case
-
-quarticBivariateSystem = method(Options => {Tolerance => 1e-6})
-quarticBivariateSystem RingElement := List => opts -> F -> (
-    (D1, D2, diag1, diag2) := bivariateDiagEntries(F, opts);
+bivariateSystem = method(Options => options bivariateOrthogonal)
+bivariateSystem RingElement := List => opts -> F -> (
+    (D1, D2, diag1, diag2) := bivariateDiagEntries(F, Tolerance => opts.Tolerance);
     D := flatten entries D1;
     R := ring F;
-    mons := matrix{{R_1^2, R_0*R_1^2, R_0^2*R_1^2, R_1^3, R_0*R_1^3, R_1^4}};
+    d := first degree F;
+    S := R/(ideal gens R)^(d+1);
+    mons := lift(super basis(ideal(S_1^2)), R);
     C := last coefficients(F, Monomials => mons);
     e := getSymbol "e";
-    T := RR(monoid[e_1..e_(binomial(4,2))]);
-    S := T[gens R];
-    A := genericSkewMatrix(T, 4);
-    B := matrix table(4, 4, (i,j) -> if i == j then diag2_(i,0) else A_(min(i,j),max(i,j)));
-    -- B := matrix table(4, 4, (i,j) -> if i <= j then A_(i,j) else -A_(i,j)) + sub(diagonalMatrix diag2, T);
-    G := det(id_(S^4) + S_0*sub(diagonalMatrix D, S) + S_1*sub(B, S));
+    T := RR(monoid[e_1..e_(binomial(d,2))]);
+    S = T[gens R];
+    A := genericSkewMatrix(T, d);
+    B := matrix table(d, d, (i,j) -> if i == j then diag2_(i,0) else A_(min(i,j),max(i,j)));
+    G := det(id_(S^d) + S_0*sub(diagonalMatrix D, S) + S_1*sub(B, S));
     C1 := last coefficients(G, Monomials => sub(mons, S)) - sub(C, S);
     P := polySystem sub(clean(opts.Tolerance, C1), T);
-    
-    -- (a, b, c, d) := toSequence flatten entries diag2;
-    -- C := flatten entries last coefficients(F, Monomials => mons);
-    -- T := RR[("e","f","g","h","k","l")/getSymbol];
-    -- (e,f,g,h,k,l) := toSequence gens T;
-    -- E := {a*b + a*c + a*d + b*c + b*d + c*d - e^2 - f^2 - g^2 - h^2 - k^2 - l^2,
-            -- D#0*(b*d + c*d + b*c) + D#1*(a*d + c*d + a*c) + D#2*(a*d + b*d + a*b) + D#3*(a*b + a*c + b*c) - e^2*(D#2 + D#3) - f^2*(D#1 + D#3) - g^2*(D#1 + D#2) - h^2*(D#0 + D#3) - k^2*(D#0 + D#2) - l^2*(D#0 + D#1),
-            -- D#0*D#1*(c*d - l^2) + D#0*D#2*(b*d - k^2) + D#0*D#3*(b*c - h^2) + D#2*D#3*(a*b - e^2) + D#1*D#2*(a*d - g^2) + D#1*D#3*(a*c - f^2),
-            -- (a*b*c + a*c*d + a*b*d + b*c*d) - e^2*(c+d) - f^2*(b+d) - g^2*(b+c) - h^2*(a+d) - k^2*(a+c) - l^2*(a+b) + 2*(h*k*l + f*g*l + e*g*k + e*f*h),
-            -- D#0*(b*c*d + 2*h*k*l) + D#1*(a*c*d + 2*f*g*l) + D#2*(a*b*d + 2*e*g*k) + D#3*(a*b*c + 2*e*f*h) - e^2*(D#2*d + D#3*c) - f^2*(D#1*d + D#3*b) - g^2*(D#1*c + D#2*b) - h^2*(D#3*a + D#0*d) - k^2*(D#2*a + D#0*c) - l^2*(D#0*b + D#1*a),
-            -- a*b*c*d - c*d*e^2 - b*d*f^2 - b*c*g^2 - a*d*h^2 - a*c*k^2 - a*b*l^2 + 2*(f*g*l*b + h*k*l*a + e*g*k*c + e*f*h*d) + e^2*l^2 + f^2*k^2 + g^2*h^2 - 2*(e*f*k*l + e*g*h*l + f*g*h*k)};
-    -- P := polySystem apply(#E, i -> E#i - sub(C#i, T));
-    
-    print "Solving 6x6 system...";
-    time sols := select(solveSystem P, p -> not status p === RefinementFailure);
+    print ("Solving " | binomial(d,2) | " x " | binomial(d,2) | " polynomial system...");
+    time sols := select(solveSystem(P, Software => opts.Software), p -> not status p === RefinementFailure);
     realPoints apply(sols, p -> point{p#Coordinates/clean_(opts.Tolerance)})
 )
 
@@ -127,23 +138,23 @@ makeUvector (List, ZZ) := List => (D, k) -> (
 )
 
 makeUComp = method()
-makeUComp (List, ZZ, ZZ) := List => (D, k, k') -> (
+makeUComp (List, ZZ, ZZ) := List => (D, k, l) -> (
     Nk := subsets(#D, k);
-    Nk1 := subsets(#D, k');
-    transpose matrix{apply(Nk1, s -> sum flatten((select(Nk, t -> #((set t)*(set s)) == 0))/(S -> product(D_S))))}
+    Nl := subsets(#D, l);
+    transpose matrix{apply(Nl, s -> sum flatten((select(Nk, t -> #((set t)*(set s)) == 0))/(S -> product(D_S))))}
 )
 
-isMajorized = method(Options => {Tolerance => 1e-6})
+isMajorized = method(Options => options quadraticDetRep)
 isMajorized (List, List) := Boolean => opts -> (v, w) -> (
     (v,w) = (v,w)/rsort;
     if not clean(opts.Tolerance, sum v - sum w) == 0 then return false;
     all(#v, k -> clean(opts.Tolerance, sum(v_{0..k}) - sum(w_{0..k})) >= 0)
 )
 
-bivariateDiagEntries = method(Options => {Tolerance => 1e-6})
+bivariateDiagEntries = method(Options => options quadraticDetRep)
 bivariateDiagEntries RingElement := Sequence => opts -> f -> ( -- returns diagonal entries and eigenvalues of coefficient matrices
     R := ring f;
-    (R1, R2) := ((coefficientRing R)[R_0], (coefficientRing R)[R_1]);
+    (R1, R2) := ((coefficientRing R)(monoid[R_0]), (coefficientRing R)(monoid[R_1]));
     (f1, f2) := (sub(sub(f, R_1 => 0), R1), sub(sub(f, R_0 => 0), R2));
     (r1, r2) := (f1, f2)/roots;
     D1 := reverse sort(apply(r1,r -> -1/r) | toList(3-#r1:0));
@@ -168,15 +179,6 @@ bivariateDiagEntries RingElement := Sequence => opts -> f -> ( -- returns diagon
     (transpose matrix{D1}, transpose matrix{D2}, diag1, diag2)
 )
 
-orthogonalFromOrthostochastic = method(Options => {Tolerance => 1e-6})
-orthogonalFromOrthostochastic Matrix := List => opts -> M -> (
-    N := matrix table(numrows M, numcols M, (i,j) -> sqrt(M_(i,j)));
-    d := numrows M;
-    sgn := toList((set{1,-1}) ^** d)/deepSplice/toList/diagonalMatrix;
-    return flatten table(sgn, sgn, (D1,D2) -> D1*N*D2);
-    select(apply(sgn, D -> D*N), O -> clean(opts.Tolerance, O*transpose O - id_((ring O)^d)) == 0)
-)
-
 --Compute Generalized Mixed discriminant of matrices
 
 generalizedMixedDiscriminant = method()
@@ -190,17 +192,27 @@ generalizedMixedDiscriminant List := RingElement => L -> (
     sum flatten table(Sk, Skv, (alpha, sigma) -> det matrix table(k, k, (i,j) -> ((keys T)#(sigma#i))_(alpha#i,alpha#j)))
 )
 
--- Helper functions for rounding
+-- Helper functions
 
 round (ZZ,CC) := (n,x) -> round(n, realPart x) + ii*round(n,imaginaryPart x)
-
 round (ZZ,ZZ) := (n,x) -> x
 
 roundMatrix = method() -- only accepts real matrices
-roundMatrix (ZZ, Matrix) := Matrix => (n, A) -> matrix table(numrows A, numcols A, (i,j) -> (round(n,0.0+A_(i,j)))^QQ)
+roundMatrix (ZZ, Matrix) := Matrix => (n, A) -> matrix apply(entries A, r -> r/(e -> (round(n,0.0+e))^QQ))
 
 liftRealMatrix = method()
-liftRealMatrix Matrix := Matrix => A -> matrix table(numrows A, numcols A, (i,j) -> realPart A_(i,j))
+liftRealMatrix Matrix := Matrix => A -> matrix apply(entries A, r -> r/realPart)
+
+hadamard = method()
+hadamard (Matrix, Matrix) := Matrix => (A, B) -> (
+    if not(numcols A == numcols B and numrows A == numrows B) then error "Expected same size matrices";
+    matrix table(numrows A, numcols A, (i,j) -> A_(i,j)*B_(i,j))
+)
+
+randomIntegerSymmetric := (d, R) -> ( A := random(ZZ^d,ZZ^d); sub(A + transpose A, R) )
+
+-- Documentation --
+-- <<docTemplate
 
 beginDocumentation()
 
@@ -208,15 +220,80 @@ doc ///
     Key
         DeterminantalRepresentations
     Headline
-    	computing definite determinantal representations of polynomials
+    	computing determinantal representations of polynomials
     Description
     	Text
-	    The goal of this package is to compute definite determinantal representations of bivariate polynomials.
+	    The goal of this package is to compute determinantal representations of polynomials. To be precise, a polynomial $f$ in $\mathbb{R}[x_1, \ldots, x_n]$ of total degree $d$ (not necessarily homogeneous) is called determinantal if $f$ is the determinant of a matrix of linear forms - in other words, there exist matrices $A_0, \ldots, A_n \in \mathbb{R}^{d\times d}$ such that $f(x_1, \ldots, x_n) = det(A_0 + x_1A_1 + \ldots + x_nA_n)$. We say that the matrices $A_0, \ldots, A_n$ give a determinantal representation of $f$ of size $d$. If the matrices $A_i$ can be chosen to be all symmetric (respectively, Hermitian), then the determinantal representation is called symmetric (resp. Hermitian). The determinantal representation is called definite if $A_0$ is positive definite, and monic if $A_0 = I_d$ is the identity matrix. 
+            
+            Even detecting whether or not a degree $d$ polynomial has a determinantal representation of size $d$ is difficult, and computing such a representation even more so. Computing (monic) symmetric determinantal representations of bivariate polynomials is already of interest, owing to a connection with real-zero and hyperbolic polynomials, due to a celebrated theorem of Helton-Vinnikov. In general, determinantal polynomials also have connections to convex algebraic geometry and semidefinite programming.
+            
+            Currently, the functions in this package are geared towards computing monic symmetric determinantal representations of quadrics, as well as bivariate cubics and quartics. The algorithms in this package can be found in [Dey1], [Dey2].
 ///
 
+doc ///
+    Key
+        quadraticDetRep
+        (quadraticDetRep, RingElement)
+        [quadraticDetRep, Tolerance]
+    Headline
+        computes determinantal representation of a quadric
+    Usage
+        quadraticDetRep f
+        quadraticDetRep(f, Tolerance => 1e-6)
+    Inputs
+        f:RingElement
+            a quadric with real coefficients
+    Outputs
+        :List
+            of matrices, giving a determinantal representation of f
+    Description
+        Text
+            This method computes a monic symmetric determinantal representation of a real quadric $f$, or returns false if no such representation exists.
+            
+            As this algorithm performs computations with floating point numbers, one can use the optional input {\tt Tolerance} to specify the internal threshold for checking equality.
+        
+        Example
+            -- R = RR[x1, x2]
+            -- f = 15*x1^2 + 20*x1*x2 - 36*x2^2 + 20*x1 + 16*x2 + 1
+            -- A = quadraticDetRep f
+            -- clean(1e-10, f - det(id_(R^2) + x1*A#0 + x2*A#1))
+            R = RR[x1, x2, x3, x4]
+            f = 260*x1^2+180*x1*x2-25*x2^2-140*x1*x3-170*x2*x3-121*x3^2+248*x1*x4+94*x2*x4-142*x3*x4+35*x4^2+36*x1+18*x2+2*x3+20*x4+1
+            time A = quadraticDetRep f
+            clean(1e-10, f - det(id_(R^2) + sum(#gens R, i -> R_i*A#i)))
+    SeeAlso
+        DeterminantalRepresentations
+///
 
--- Documentation --
--- <<docTemplate
+doc ///
+    Key
+        bivariateDiagEntries
+        (bivariateDiagEntries, RingElement)
+        [bivariateDiagEntries, Tolerance]
+    Headline
+        computes diagonal entries and eigenvalues for a determinantal representation of a bivariate polynomial
+    Usage
+        bivariateDiagEntries f
+        bivariateDiagEntries(f, Tolerance => 1e-6)
+    Inputs
+        f:RingElement
+            a bivariate polynomial with real coefficients
+    Outputs
+        :Sequence
+            consisting of eigenvalues and diagonal entries of a potential determinantal representation of f
+    Description
+        Text
+            This method computes the eigenvalues and diagonal entries of a (potential) monic symmetric determinantal representation of a real bivariate polynomial $f$, or returns false certain necessary conditions for existence of such a representation are not met.
+            
+            As this algorithm performs computations with floating point numbers, one can use the optional input {\tt Tolerance} to specify the internal threshold for checking equality.
+        
+        Example
+            R = RR[x1, x2]
+            f = 15*x1^2 + 20*x1*x2 - 36*x2^2 + 20*x1 + 16*x2 + 1
+            bivariateDiagEntries f
+    SeeAlso
+        DeterminantalRepresentations
+///
 
 -----------------------------
 
@@ -260,7 +337,6 @@ assert((last coefficients(P, Monomials => {x_1*x_2*x_3}))_(0,0) == generalizedMi
 -- assert((last coefficients(P, Monomials => {x_1^3*x_2^2*x_3}))_(0,0) == generalizedMixedDiscriminant({A,A,A,B,B,C})) -- these coefficients are 0
 ///
 
-
 end--
 restart
 loadPackage("DeterminantalRepresentations", Reload => true)
@@ -269,15 +345,6 @@ installPackage "DeterminantalRepresentations"
 installPackage("DeterminantalRepresentations", RemakeAllDocumentation => true)
 viewHelp "DeterminantalRepresentations"
 check "DeterminantalRepresentations"
-
-
--- Examples of quadric
-
-C = matrix{{1_RR,0,0,0},{0,-1,0,0},{0,0,-1,0},{0,0,0,-1}}
-b=matrix{{2_RR},{0},{0},{0}} 
-C = matrix{{-5_RR,-4,-2},{-4,-100,-6},{-2,-6,-1}}
-b=matrix{{0_RR},{0},{0}}
-
 
 --Cubic bivariate 
  
@@ -342,11 +409,22 @@ R = RR[x,y];A = sub(diagonalMatrix{5,6,7,8},R);f = det(id_(R^4) + x*sub(diagonal
 R = RR[x,y]
 A = sub(diagonalMatrix{5,6,7,8},R)
 f = det(id_(R^4) + x*sub(diagonalMatrix {1,2,3,4},R) + y*A)
-quarticBivariateSystem f -- diagonal case
+bivariateSystem f -- diagonal case
 A = sub(random(ZZ^4,ZZ^4), R)
 f = det(id_(R^4) + x*sub(diagonalMatrix {1,2,3,4},R) + y*(A + transpose A))
 f = det(id_(R^4) + x*sub(diagonalMatrix {4,3,2,1},R) + y*(A + transpose A))
-quarticBivariateSystem f -- gives no real solutions
+bivariateSystem f
+
+
+-- Quintic
+
+mons := matrix{{R_1^2, R_0*R_1^2, R_0^2*R_1^2, R_1^3, R_0*R_1^3, R_1^4, R_0^3*R_1^2, R_0^2*R_1^3, R_0*R_1^4, R_1^5}};
+S = R/(ideal gens R)^6
+sort flatten entries lift(super basis(ideal(S_1^2)), R)
+
+R = RR[x,y]
+A = sub(random(ZZ^5,ZZ^5),R)
+f = det(id_(R^5) + x*sub(diagonalMatrix {1,2,3,4,5},R) + y*(A + transpose A))
 
 -- bivariateOrthogonal test
 
