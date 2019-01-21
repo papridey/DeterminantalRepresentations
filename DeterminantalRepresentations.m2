@@ -295,6 +295,39 @@ doc ///
         DeterminantalRepresentations
 ///
 
+doc ///
+    Key
+        generalizedMixedDiscriminant
+        (generalizedMixedDiscriminant, List)
+    Headline
+        computes generalized mixed discriminant of a list of matrices
+    Usage
+        generalizedMixedDiscriminant L
+    Inputs
+        L:List
+            an $n$-tuple of $n\times n$ matrices
+    Outputs
+        :RingElement
+            the generalized mixed discriminant of L
+    Description
+        Text
+            This method computes the generalized mixed discriminant of $n$-tuple of $n\times n$ matrices.
+                 
+        Example
+            n = 3
+            R = QQ[a_(1,1)..a_(n,n),b_(1,1)..b_(n,n),c_(1,1)..c_(n,n)][x_1..x_n]
+            A = sub(transpose genericMatrix(coefficientRing R,n,n), R)
+            B = sub(transpose genericMatrix(coefficientRing R,b_(1,1),n,n), R)
+            C = sub(transpose genericMatrix(coefficientRing R,c_(1,1),n,n), R)
+            P = det(id_(R^n) + x_1*A + x_2*B + x_3*C);
+	    gmd = generalizedMixedDiscriminant({A,B,C})
+	    coeff = (last coefficients(P, Monomials => {x_1*x_2*x_3}))_(0,0)
+            gmd == coeff
+    SeeAlso
+        DeterminantalRepresentations
+///
+
+
 -----------------------------
 
 -- TESTS
