@@ -1,7 +1,7 @@
 newPackage("DeterminantalRepresentations",
 	AuxiliaryFiles => false,
-	Version => "0.0.3",
-	Date => "January 19, 2019",
+	Version => "0.0.4",
+	Date => "February 8, 2019",
 	Authors => {
 		{Name => "Justin Chen",
 		Email => "jchen646@gatech.edu"},
@@ -23,7 +23,12 @@ export {
     "orthogonalFromOrthostochastic",
     "bivariateDiagEntries",
     "roundMatrix",
-    "hadamard"
+    "liftRealMatrix",
+    "hadamard",
+    "isOrthogonal",
+    "isDoublystochastic",
+    "randomIntegerSymmetric",
+    "randomOrthostochastic"
 }
 
 -- Quadratic case
@@ -61,7 +66,7 @@ cubicBivariateOrthostochastic RingElement := List => opts -> f -> ( -- returns a
     q21 := (-(D1_(0,0)-D1_(2,0))*(diag2_(0,0)-D2_(2,0)-S_0*(D2_(1,0)-D2_(2,0)))+(D2_(0,0)-D2_(2,0))*(diag1_(0,0)-D1_(2,0)))/((D1_(1,0)-D1_(2,0))*(D2_(0,0)-D2_(2,0)));
     q22 := (diag1_(1,0)-D1_(2,0)-S_0*(D1_(0,0)-D1_(2,0)))/(D1_(1,0)-D1_(2,0));
     Q := matrix{{q11, S_0, 1 - S_0 - q11}, {q21, q22, 1 - q21 - q22}, {1 - q11 - q21, 1 - S_0 - q22, 1 - (1 - S_0 - q11) - (1 - q21 - q22)}};
-    apply(roots((1 - q11 - q22 - S_0 - q21 + q11*q22 + S_0*q21)^2 - 4*q11*q22*S_0*q21), r -> sub(Q, S_0 => r))
+    select(apply(roots((1 - q11 - q22 - S_0 - q21 + q11*q22 + S_0*q21)^2 - 4*q11*q22*S_0*q21), r -> liftRealMatrix sub(Q, S_0 => r)), isDoublystochastic)
 )
 
 orthogonalFromOrthostochastic = method(Options => options quadraticDetRep)
@@ -69,19 +74,12 @@ orthogonalFromOrthostochastic Matrix := List => opts -> M -> (
     if min(flatten entries M) < 0 then return {};
     N := matrix apply(entries M, r -> r/sqrt);
     d := numrows M;
-    sgn := toList((set{1,-1}) ^** (d-1))/deepSplice/toList;
-    row1 := transpose N^{0};
-    validRows := {{N^{0}}};
+    sgn := drop(sort toList((set{1,-1}) ^** (d-1))/deepSplice/toList, -1);
+    validRows := {{{N^{0}}}};
     for i from 1 to numrows N-1 do (
-        for S in sgn do (
-            candidate := hadamard(matrix{{1} | S}, N^{i});
-            if clean(opts.Tolerance, candidate*row1) == 0 then (
-                validRows = append(validRows, {candidate});
-                break;
-            );
-        );
+        validRows = flatten apply(validRows, rowset -> apply(select(sgn/(S -> hadamard(matrix{{1} | S}, N^{i})), candidate -> clean(opts.Tolerance, matrix rowset * transpose candidate) == 0), r -> append(rowset, {r})));
     );
-    matrix validRows
+    unique validRows/matrix
 )
 
 -- General bivariate case 
@@ -131,19 +129,6 @@ bivariateSystem RingElement := List => opts -> F -> (
 
 -- Helper functions for bivariate case
 
-makeUvector = method()
-makeUvector (List, ZZ) := List => (D, k) -> (
-    Nk := subsets(#D,k);
-    transpose matrix{apply(Nk, s -> product(s, i -> D_i))}
-)
-
-makeUComp = method()
-makeUComp (List, ZZ, ZZ) := List => (D, k, l) -> (
-    Nk := subsets(#D, k);
-    Nl := subsets(#D, l);
-    transpose matrix{apply(Nl, s -> sum flatten((select(Nk, t -> #((set t)*(set s)) == 0))/(S -> product(D_S))))}
-)
-
 isMajorized = method(Options => options quadraticDetRep)
 isMajorized (List, List) := Boolean => opts -> (v, w) -> (
     (v,w) = (v,w)/rsort;
@@ -181,6 +166,19 @@ bivariateDiagEntries RingElement := Sequence => opts -> f -> ( -- returns diagon
 
 --Compute Generalized Mixed discriminant of matrices
 
+makeUvector = method()
+makeUvector (List, ZZ) := List => (D, k) -> (
+    Nk := subsets(#D,k);
+    transpose matrix{apply(Nk, s -> product(s, i -> D_i))}
+)
+
+makeUComp = method()
+makeUComp (List, ZZ, ZZ) := List => (D, k, l) -> (
+    Nk := subsets(#D, k);
+    Nl := subsets(#D, l);
+    transpose matrix{apply(Nl, s -> sum flatten((select(Nk, t -> #((set t)*(set s)) == 0))/(S -> product(D_S))))}
+)
+
 generalizedMixedDiscriminant = method()
 generalizedMixedDiscriminant List := RingElement => L -> (
     T := tally L;
@@ -192,7 +190,7 @@ generalizedMixedDiscriminant List := RingElement => L -> (
     sum flatten table(Sk, Skv, (alpha, sigma) -> det matrix table(k, k, (i,j) -> ((keys T)#(sigma#i))_(alpha#i,alpha#j)))
 )
 
--- Helper functions
+-- General helper functions
 
 round (ZZ,CC) := (n,x) -> round(n, realPart x) + ii*round(n,imaginaryPart x)
 round (ZZ,ZZ) := (n,x) -> x
@@ -209,7 +207,49 @@ hadamard (Matrix, Matrix) := Matrix => (A, B) -> (
     matrix table(numrows A, numcols A, (i,j) -> A_(i,j)*B_(i,j))
 )
 
-randomIntegerSymmetric := (d, R) -> ( A := random(ZZ^d,ZZ^d); sub(A + transpose A, R) )
+-- Tests for matrix classes
+
+isOrthogonal = method(Options => options quadraticDetRep)
+isOrthogonal Matrix := Boolean => opts -> A -> (
+    if not numcols A == numrows A then (
+        if debugLevel > 0 then print "Not a square matrix";
+        return false;
+    );
+    delta := A*transpose A - id_((ring A)^(numcols A));
+    if instance(class 1_(ultimate(coefficientRing, ring A)), InexactFieldFamily) then delta = clean(opts.Tolerance, delta);
+    delta == 0
+)
+
+isDoublystochastic = method(Options => options quadraticDetRep)
+isDoublystochastic Matrix := Boolean => opts -> A -> (
+    n := numcols A;
+    if not numrows A == n then ( if debugLevel > 0 then print "Not a square matrix"; return false; );
+    if not class(ultimate(coefficientRing, ring A)) === RealField then ( if debugLevel > 0 then print "Not a real matrix"; return false; );
+    if not min flatten entries A >= 0 then ( if debugLevel > 0 then print "Not all entries are nonnegative"; return false; );
+    v := matrix{toList(n:1_RR)};
+    if not clean(opts.Tolerance, v*A - v) == 0 and clean(opts.Tolerance, A*transpose v - transpose v) == 0 then ( if debugLevel > 0 then print "Not doubly stochastic"; return false; );
+    true
+)
+
+-- Construct various types of matrices
+
+randomIntegerSymmetric = method()
+randomIntegerSymmetric (ZZ, Ring) := Matrix => (d, R) -> ( 
+    A := random(ZZ^d,ZZ^d); 
+    sub(A + transpose A, R)
+)
+randomIntegerSymmetric ZZ := Matrix => d -> randomIntegerSymmetric(d, ZZ)
+
+randomOrthostochastic = method(Options => options quadraticDetRep)
+randomOrthostochastic ZZ := Matrix => opts -> n -> (
+    o := symbol o;
+    R := RR[o_(1,1)..o_(n,n)];
+    A := genericMatrix(R, n, n);
+    I := ideal apply(subsets(n, 2) /toSequence | apply(n, i -> 2:i), s -> (A*transpose A - id_(R^n))_s);
+    p0 := point id_(RR^n);
+    p := (track(I_* | flatten entries((vars R - matrix p0)*random(RR^(n^2), RR^(n^2 - #I_*))), I_* | flatten entries(vars R*random(RR^(n^2), RR^(n^2 - #I_*))), {p0}))#0#Coordinates;
+    clean(opts.Tolerance, liftRealMatrix matrix pack(n, apply(p, c -> c^2)))
+)
 
 -- Documentation --
 -- <<docTemplate
@@ -223,11 +263,11 @@ doc ///
     	computing determinantal representations of polynomials
     Description
     	Text
-	    The goal of this package is to compute determinantal representations of polynomials. To be precise, a polynomial $f$ in $\mathbb{R}[x_1, \ldots, x_n]$ of total degree $d$ (not necessarily homogeneous) is called determinantal if $f$ is the determinant of a matrix of linear forms - in other words, there exist matrices $A_0, \ldots, A_n \in \mathbb{R}^{d\times d}$ such that $f(x_1, \ldots, x_n) = det(A_0 + x_1A_1 + \ldots + x_nA_n)$. We say that the matrices $A_0, \ldots, A_n$ give a determinantal representation of $f$ of size $d$. If the matrices $A_i$ can be chosen to be all symmetric (respectively, Hermitian), then the determinantal representation is called symmetric (resp. Hermitian). The determinantal representation is called definite if $A_0$ is positive definite, and monic if $A_0 = I_d$ is the identity matrix. 
+	    The goal of this package is to compute determinantal representations of polynomials. To be precise, a polynomial $f$ in $\mathbb{R}[x_1, \ldots, x_n]$ of total degree $d$ (not necessarily homogeneous) is called determinantal if $f$ is the determinant of a matrix of linear forms - in other words, there exist matrices $A_0, \ldots, A_n \in \mathbb{R}^{d\times d}$ such that $f(x_1, \ldots, x_n) = det(A_0 + x_1A_1 + \ldots + x_nA_n)$. The matrices $A_0, \ldots, A_n$ are said to give a determinantal representation of $f$ of size $d$. If the matrices $A_i$ can be chosen to be all symmetric (respectively, Hermitian), then the determinantal representation is called symmetric (resp. Hermitian). The determinantal representation is called definite if $A_0$ is positive definite, and monic if $A_0 = I_d$ is the identity matrix. 
             
-            Even detecting whether or not a degree $d$ polynomial has a determinantal representation of size $d$ is difficult, and computing such a representation even more so. Computing (monic) symmetric determinantal representations of bivariate polynomials is already of interest, owing to a connection with real-zero and hyperbolic polynomials, due to a celebrated theorem of Helton-Vinnikov. In general, determinantal polynomials also have connections to convex algebraic geometry and semidefinite programming.
+            Detecting whether or not a degree $d$ polynomial has a determinantal representation of size $d$ is already difficult, and computing such a representation even more so. Computing (monic) symmetric determinantal representations of bivariate polynomials is of interest owing to a connection with real-zero and hyperbolic polynomials, due to a celebrated theorem of Helton-Vinnikov. In general, determinantal polynomials also have connections to convex algebraic geometry and semidefinite programming.
             
-            Currently, the functions in this package are geared towards computing monic symmetric determinantal representations of quadrics, as well as bivariate cubics and quartics. The algorithms in this package can be found in [Dey1], [Dey2].
+            Currently, the functions in this package are geared towards computing monic symmetric determinantal representations of quadrics, as well as bivariate cubics and quartics. The algorithms implemented in this package can be found in [Dey1], [Dey2].
 ///
 
 doc ///
@@ -245,24 +285,18 @@ doc ///
             a quadric with real coefficients
     Outputs
         :List
-            of matrices, giving a determinantal representation of f
+            of matrices, giving a determinantal representation of $f$
     Description
         Text
             This method computes a monic symmetric determinantal representation of a real quadric $f$, or returns false if no such representation exists.
             
-            As this algorithm performs computations with floating point numbers, one can use the optional input {\tt Tolerance} to specify the internal threshold for checking equality.
+            The option {\tt Tolerance} can be used to specify the internal threshold for checking equality (any floating point number below the tolerance is treated as numerically zero).
         
         Example
-            -- R = RR[x1, x2]
-            -- f = 15*x1^2 + 20*x1*x2 - 36*x2^2 + 20*x1 + 16*x2 + 1
-            -- A = quadraticDetRep f
-            -- clean(1e-10, f - det(id_(R^2) + x1*A#0 + x2*A#1))
             R = RR[x1, x2, x3, x4]
             f = 260*x1^2+180*x1*x2-25*x2^2-140*x1*x3-170*x2*x3-121*x3^2+248*x1*x4+94*x2*x4-142*x3*x4+35*x4^2+36*x1+18*x2+2*x3+20*x4+1
             time A = quadraticDetRep f
             clean(1e-10, f - det(id_(R^2) + sum(#gens R, i -> R_i*A#i)))
-    SeeAlso
-        DeterminantalRepresentations
 ///
 
 doc ///
@@ -280,19 +314,150 @@ doc ///
             a bivariate polynomial with real coefficients
     Outputs
         :Sequence
-            consisting of eigenvalues and diagonal entries of a potential determinantal representation of f
+            of eigenvalues and diagonal entries of a determinantal representation of $f$
     Description
         Text
-            This method computes the eigenvalues and diagonal entries of a (potential) monic symmetric determinantal representation of a real bivariate polynomial $f$, or returns false certain necessary conditions for existence of such a representation are not met.
+            This method computes the eigenvalues and diagonal entries of a monic symmetric determinantal representation of a real bivariate polynomial $f$, or returns false if certain necessary conditions for existence of such a representation are not met. For a symmetric determinantal representation $f = det(I + x_1A_1 + x_2A_2)$, this method computes diagonal entries and eigenvalues of $A_1$ and $A_2$. The output is a 4-tuple of column vectors: (eigenvalues of A_1, eigenvalues of $A_2$, diagonal entries of $A_1$, diagonal entries of $A_2$).
             
-            As this algorithm performs computations with floating point numbers, one can use the optional input {\tt Tolerance} to specify the internal threshold for checking equality.
+            The option {\tt Tolerance} can be used to specify the internal threshold for checking equality (any floating point number below the tolerance is treated as numerically zero).
         
         Example
             R = RR[x1, x2]
             f = 15*x1^2 + 20*x1*x2 - 36*x2^2 + 20*x1 + 16*x2 + 1
             bivariateDiagEntries f
+///
+
+doc ///
+    Key
+        cubicBivariateOrthostochastic
+        (cubicBivariateOrthostochastic, RingElement)
+        [cubicBivariateOrthostochastic, Tolerance]
+    Headline
+        computes orthostochastic matrices for a determinantal representation of a cubic bivariate polynomial
+    Usage
+        cubicBivariateOrthostochastic f
+        cubicBivariateOrthostochastic(f, Tolerance => 1e-6)
+    Inputs
+        f:RingElement
+            a cubic bivariate polynomial with real coefficients
+    Outputs
+        :List
+            of orthostochastic matrices corresponding to determinantal representations of $f$
+    Description
+        Text
+            This method computes @TO2{randomOrthostochastic, "orthostochastic"}@ matrices used in finding a monic symmetric determinantal representation of a real cubic bivariate polynomial $f$, or returns false if certain necessary conditions for existence of such a representation are not met. For a symmetric determinantal representation $f = det(I + x_1A_1 + x_2A_2)$, by suitable conjugation one may assume $A_1 = D_1$ is a diagonal matrix. Since $A_2$ is symmetric, by the spectral theorem there exist an orthogonal change-of-basis matrix $V$ such that $VA_2V^T = D_2$ is diagonal. Since $D_1, D_2$ can be found using the method @TO bivariateDiagEntries@, to find a symmetric determinantal representation of $f$ it suffices to compute the orthogonal matrix $V$. This method computes the orthostochastic matrix which is the Hadamard square of $V$, via the algorithm in [Dey1].
+            
+            The option {\tt Tolerance} can be used to specify the internal threshold for checking equality (any floating point number below the tolerance is treated as numerically zero).
+        
+        Example
+            R = RR[x1, x2]
+            f=6*x1^3+36*x1^2*x2+11*x1^2+66*x1*x2^2+42*x1*x2+6*x1+36*x2^3+36*x2^2+11*x2+1
+            cubicBivariateOrthostochastic f
     SeeAlso
-        DeterminantalRepresentations
+        bivariateDiagEntries
+        orthogonalFromOrthostochastic
+///
+
+doc ///
+    Key
+        orthogonalFromOrthostochastic
+        (orthogonalFromOrthostochastic, Matrix)
+        [orthogonalFromOrthostochastic, Tolerance]
+    Headline
+        computes orthogonal matrices for a given orthostochastic matrix
+    Usage
+        orthogonalFromOrthostochastic A
+        cubicBivariateOrthostochastic(A, Tolerance => 1e-6)
+    Inputs
+        A:Matrix
+            an orthostochastic matrix
+    Outputs
+        :List
+            of orthogonal matrices whose Hadamard square is $A$
+    Description
+        Text
+            This method computes orthogonal matrices whose Hadamard square is a given @TO2{randomOrthostochastic, "orthostochastic"}@ matrix. Combined with the method @TO cubicBivariateOrthostochastic@, this allows one to compute symmetric determinantal representations of real cubic bivariate polynomials. 
+            
+            Given a $n\times n$ orthostochastic matrix $A$, there are $2^{n^2}$ possible matrices whose Hadamard square is $A$ (not all of which will be orthogonal in general though). Let $G\cong (\ZZ/2\ZZ)^n$ be the group of diagonal matrices with diagonal entries equal to &plusmn;1. One can act (on the left and right) by $G\times G$ on the set of orthogonal matrices whose Hadamard square is $A$. This method computes all such orthogonal matrices, modulo the action of $G\times G$. The representative for each orbit is chosen so that the first row and column will have nonnegative entries.
+            
+            The option {\tt Tolerance} can be used to specify the internal threshold for checking equality (any floating point number below the tolerance is treated as numerically zero).
+        
+        Example
+            R = RR[x1, x2]
+            f=6*x1^3+36*x1^2*x2+11*x1^2+66*x1*x2^2+42*x1*x2+6*x1+36*x2^3+36*x2^2+11*x2+1
+            L = cubicBivariateOrthostochastic f
+            apply(L, orthogonalFromOrthostochastic)
+            A = randomOrthostochastic 4
+            orthogonalFromOrthostochastic A
+    SeeAlso
+        cubicBivariateOrthostochastic
+///
+
+doc ///
+    Key
+        bivariateOrthogonal
+        (bivariateOrthogonal, RingElement)
+        [bivariateOrthogonal, Tolerance]
+        [bivariateOrthogonal, Software]
+    Headline
+        computes orthogonal matrices for a determinantal representation of a bivariate polynomial
+    Usage
+        bivariateOrthogonal f
+        bivariateOrthogonal(f, Tolerance => 1e-6)
+    Inputs
+        f:RingElement
+            a bivariate polynomial with real coefficients
+    Outputs
+        :List
+            of orthogonal matrices corresponding to determinantal representations of $f$
+    Description
+        Text
+            This method computes orthogonal matrices used in finding a monic symmetric determinantal representation of a real bivariate polynomial $f$. For a symmetric determinantal representation $f = det(I + x_1A_1 + x_2A_2)$, by suitable conjugation one may assume $A_1 = D_1$ is a diagonal matrix. Since $A_2$ is symmetric, by the spectral theorem there exist an orthogonal change-of-basis matrix $V$ such that $VA_2V^T = D_2$ is diagonal. Since $D_1, D_2$ can be found using the method @TO bivariateDiagEntries@, to find a symmetric determinantal representation of $f$ it suffices to compute the orthogonal matrix $V$. This method computes the orthogonal matrix $V$ via numerical algebraic geometry.
+            
+            The option {\tt Tolerance} can be used to specify the internal threshold for checking equality (any floating point number below the tolerance is treated as numerically zero). The option @TO Software@ specifies the numerical algebraic geometry software used to perform a numerical irreducible decomposition: by default, the native M2engine is used, although other valid options include BERTINI and PHCPACK (if the user has these installed on their system).
+        
+        Example
+            R = RR[x1, x2]
+            f=6*x1^3+36*x1^2*x2+11*x1^2+66*x1*x2^2+42*x1*x2+6*x1+36*x2^3+36*x2^2+11*x2+1
+            bivariateOrthogonal f
+    Caveat
+        Due to the time-consuming process of computing a numerical irreducible decomposition, this algorithm may not terminate for a polynomial of large degree (e.g. degree >= 5).
+    SeeAlso
+        bivariateDiagEntries
+///
+
+doc ///
+    Key
+        bivariateSystem
+        (bivariateSystem, RingElement)
+        [bivariateSystem, Tolerance]
+        [bivariateSystem, Software]
+    Headline
+        computes a determinantal representation of a bivariate polynomial numerically
+    Usage
+        bivariateSystem f
+        bivariateSystem(f, Tolerance => 1e-6)
+    Inputs
+        f:RingElement
+            a bivariate polynomial with real coefficients
+    Outputs
+        :List
+            of orthogonal matrices corresponding to determinantal representations of $f$
+    Description
+        Text
+            This method implements a brute-force algorithm to find a monic symmetric determinantal representation of a real cubic bivariate polynomial $f$. For a symmetric determinantal representation $f = det(I + x_1A_1 + x_2A_2)$, by suitable conjugation one may assume $A_1 = D_1$ is a diagonal matrix. Since $D_1$ and the diagonal entries of $A_2$ can be found using the method @TO bivariateDiagEntries@, to find a symmetric determinantal representation of $f$ it suffices to compute the off-diagonal entries of $A_2$. These off-diagonal entries of $A_2$ are solutions to a $(d choose 2)\times (d choose 2)$ polynomial system, for a determinantal representation of size $d$. This method computes solutions to this system via numerical algebraic geometry.
+            
+            The option {\tt Tolerance} can be used to specify the internal threshold for checking equality (any floating point number below the tolerance is treated as numerically zero). The option @TO Software@ specifies the numerical algebraic geometry software used to perform a numerical irreducible decomposition: by default, the native M2engine is used, although other valid options include BERTINI and PHCPACK (if the user has these installed on their system).
+        
+        Example
+            R = RR[x1, x2]
+            f=6*x1^3+36*x1^2*x2+11*x1^2+66*x1*x2^2+42*x1*x2+6*x1+36*x2^3+36*x2^2+11*x2+1
+            bivariateSystem f
+    Caveat
+        As this algorithm implements a relatively naive algorithm, it may not terminate for a polynomial of large degree (e.g. degree >= 5).
+    SeeAlso
+        bivariateDiagEntries
+        bivariateOrthogonal
 ///
 
 doc ///
@@ -311,7 +476,7 @@ doc ///
             the generalized mixed discriminant of L
     Description
         Text
-            This method computes the generalized mixed discriminant of $n$-tuple of $n\times n$ matrices.
+            This method computes the generalized mixed discriminant of an $n$-tuple of $n\times n$ matrices.
                  
         Example
             n = 3
@@ -323,8 +488,195 @@ doc ///
 	    gmd = generalizedMixedDiscriminant({A,B,C})
 	    coeff = (last coefficients(P, Monomials => {x_1*x_2*x_3}))_(0,0)
             gmd == coeff
-    SeeAlso
-        DeterminantalRepresentations
+///
+
+doc ///
+    Key
+        isDoublystochastic
+        (isDoublystochastic, Matrix)
+        [isDoublystochastic, Tolerance]
+    Headline
+        whether a matrix is doubly stochastic
+    Usage
+        isDoublystochastic A
+    Inputs
+        A:Matrix
+    Outputs
+        :Boolean
+            whether $A$ is a doubly stochastic matrix
+    Description
+        Text
+            This method determines whether a given matrix is doubly stochastic, i.e. is a real square matrix with all entries nonnegative and all row and column sums equal to $1$. 
+            
+            The option {\tt Tolerance} can be used to specify the internal threshold for checking equality (any floating point number below the tolerance is treated as numerically zero).
+                 
+        Example
+            R = RR[x1, x2]
+            f=6*x1^3+36*x1^2*x2+11*x1^2+66*x1*x2^2+42*x1*x2+6*x1+36*x2^3+36*x2^2+11*x2+1
+            L = cubicBivariateOrthostochastic f
+            isDoublystochastic L#0
+            A = randomOrthostochastic 3
+            isDoublystochastic A
+///
+
+doc ///
+    Key
+        isOrthogonal
+        (isOrthogonal, Matrix)
+        [isOrthogonal, Tolerance]
+    Headline
+        whether a matrix is orthogonal
+    Usage
+        isOrthogonal A
+    Inputs
+        A:Matrix
+    Outputs
+        :Boolean
+            whether $A$ is orthogonal
+    Description
+        Text
+            This method determines whether a given matrix is orthogonal, i.e. has inverse equal to its transpose. 
+            
+            The option {\tt Tolerance} can be used to specify the internal threshold for checking equality (any floating point number below the tolerance is treated as numerically zero). If the given matrix does not have floating point entries, then this option is not used.
+                 
+        Example
+            R = RR[x1, x2]
+            f=6*x1^3+36*x1^2*x2+11*x1^2+66*x1*x2^2+42*x1*x2+6*x1+36*x2^3+36*x2^2+11*x2+1
+            O = first orthogonalFromOrthostochastic first cubicBivariateOrthostochastic f
+            isOrthogonal O
+///
+
+doc ///
+    Key
+        randomOrthostochastic
+        (randomOrthostochastic, ZZ)
+        [randomOrthostochastic, Tolerance]
+    Headline
+        constructs a random orthostochastic matrix
+    Usage
+        randomOrthostochastic n
+        randomOrthostochastic(n, Tolerance => 1e-6)
+    Inputs
+        n:ZZ
+    Outputs
+        :Matrix
+            a random $n\times n$ orthostochastic matrix
+    Description
+        Text
+            This method returns a random orthostochastic matrix of a given size $n$. A real square matrix $A$ is said to be orthostochastic if there is an orthogonal matrix $V$ whose Hadamard square is $A$. Note that an orthostochastic matrix is necessarily @TO2{isDoublystochastic, "doubly stochastic"}@.
+            
+            The option {\tt Tolerance} can be used to specify the internal threshold for checking equality (any floating point number below the tolerance is treated as numerically zero).
+            
+        Example
+            A3 = randomOrthostochastic 3
+            isDoublystochastic A3
+            time A10 = randomOrthostochastic(10, Tolerance => 1e-8)
+            isDoublystochastic A10
+///
+
+doc ///
+    Key
+        randomIntegerSymmetric
+        (randomIntegerSymmetric, ZZ)
+        (randomIntegerSymmetric, ZZ, Ring)
+    Headline
+        constructs a random integer symmetric matrix
+    Usage
+        randomIntegerSymmetric n
+        randomIntegerSymmetric(n, R)
+    Inputs
+        n:ZZ
+        R:Ring
+    Outputs
+        :Matrix
+            a random $n\times n$ symmetric matrix with integer entries
+    Description
+        Text
+            This method returns a random symmetric matrix of a given size $n$ with integer entries. This can in turn be specialized to any ring, which may be provided as an argument. 
+                 
+        Example
+            randomIntegerSymmetric 5
+            randomIntegerSymmetric 20
+            R = RR[x,y]
+            randomIntegerSymmetric(3, R)
+    Caveat
+        The entries of the constructed matrix will be integers between 0 and 18, inclusive.
+///
+
+doc ///
+    Key
+        hadamard
+        (hadamard, Matrix, Matrix)
+    Headline
+        computes the Hadamard product of two matrices
+    Usage
+        hadamard(A, B)
+    Inputs
+        A:
+            an $m\times n$ matrix
+        B:
+            an $m\times n$ matrix
+    Outputs
+        :Matrix
+            the Hadamard product of $A$ and $B$
+    Description
+        Text
+            This method computes the Hadamard product of two matrices $A, B$ of the same size. The Hadamard product is defined as the componentwise product, i.e. if $A, B$ are $m\times n$ matrices, then the Hadamard product is the $m\times n$ matrix with $(i,j)$ entry equal to $A_{i,j}*B_{i,j}$.
+                 
+        Example
+            A = randomOrthostochastic 3
+            O = first orthogonalFromOrthostochastic A
+            clean(1e-10, hadamard(O, O) - A)
+///
+
+doc ///
+    Key
+        liftRealMatrix
+        (liftRealMatrix, Matrix)
+    Headline
+        lifts matrix over CC to matrix over RR
+    Usage
+        liftRealMatrix A
+    Inputs
+        A:Matrix
+            with complex entries
+    Outputs
+        :Matrix
+            the real matrix whose entries are real parts of entries of A
+    Description
+        Text
+            This method converts a complex matrix a real matrix, by taking the real part of each entry. 
+                 
+        Example
+            A = random(RR^3,RR^5)
+            B = sub(A, CC)
+            C = liftRealMatrix B
+            clean(1e-10, A - C) == 0
+///
+
+doc ///
+    Key
+        roundMatrix
+        (roundMatrix, ZZ, Matrix)
+    Headline
+        lifts matrix over RR to matrix over QQ
+    Usage
+        roundMatrix(n, A)
+    Inputs
+        A:Matrix
+            with real entries
+        n:ZZ
+            a threshold for rounding digits
+    Outputs
+        :Matrix
+            a matrix over QQ, obtained by rounding entries of A
+    Description
+        Text
+            This method converts a real matrix to a rational matrix, by rounding each entry. The input $n$ specifies the number of (decimal) digits used for rounding.
+                 
+        Example
+            A = matrix{{1, 2.5, -13/17}, {1*pi, 4.7, sqrt(2)}}
+            roundMatrix(5, A)
 ///
 
 
@@ -332,7 +684,7 @@ doc ///
 
 -- TESTS
 
-TEST /// -- Quadratic determinantal representation tests
+TEST /// -- Quadratic case tests
 R = RR[x1,x2,x3]
 f = 1 - 8*x1*x2 - 4*x1*x3 - 100*x2^2 - 12*x2*x3 - x3^2 - 5*x1^2
 coeffMatrices = quadraticDetRep f
@@ -343,13 +695,13 @@ TEST /// -- cubic case tests
 R=QQ[x1,x2]
 f=6*x1^3+36*x1^2*x2+11*x1^2+66*x1*x2^2+42*x1*x2+6*x1+36*x2^3+36*x2^2+11*x2+1
 orthostochasticMatrices = cubicBivariateOrthostochastic f
-L1 = orthogonalFromOrthostochastic last orthostochasticMatrices
+O1 = orthogonalFromOrthostochastic last orthostochasticMatrices
 M = matrix{{0.5322,0.3711,0.0967},{0.4356,0.2578,0.3066},{0.0322,0.3711,0.5967}}
-L2 = orthogonalFromOrthostochastic M
-assert(all(L2, M -> any(L1, N -> 0 == clean(1e-4, N - M))))
+assert(orthogonalFromOrthostochastic M === {})
+assert(clean(1e-4, first(O1 - orthogonalFromOrthostochastic(M, Tolerance => 1e-4))) == 0)
 ///
 
-TEST /// -- Generalized mixed discriminant tests
+TEST /// -- Generalized mixed discriminant - bivariate case
 n = 4
 R = QQ[a_(1,1)..a_(n,n),b_(1,1)..b_(n,n)][x_1,x_2]
 A = sub(transpose genericMatrix(coefficientRing R,n,n), R)
@@ -359,7 +711,7 @@ assert((last coefficients(P, Monomials => {x_1*x_2}))_(0,0) == generalizedMixedD
 assert((last coefficients(P, Monomials => {x_1^3*x_2}))_(0,0) == generalizedMixedDiscriminant({A,A,A,B}))
 ///
 
-TEST ///
+TEST /// -- Generalized mixed discriminant - trivariate case
 n = 3
 R = QQ[a_(1,1)..a_(n,n),b_(1,1)..b_(n,n),c_(1,1)..c_(n,n)][x_1..x_n]
 A = sub(transpose genericMatrix(coefficientRing R,n,n), R)
@@ -367,7 +719,6 @@ B = sub(transpose genericMatrix(coefficientRing R,b_(1,1),n,n), R)
 C = sub(transpose genericMatrix(coefficientRing R,c_(1,1),n,n), R)
 P = det(id_(R^n) + x_1*A + x_2*B + x_3*C);
 assert((last coefficients(P, Monomials => {x_1*x_2*x_3}))_(0,0) == generalizedMixedDiscriminant({A,B,C}))
--- assert((last coefficients(P, Monomials => {x_1^3*x_2^2*x_3}))_(0,0) == generalizedMixedDiscriminant({A,A,A,B,B,C})) -- these coefficients are 0
 ///
 
 end--
@@ -379,94 +730,21 @@ installPackage("DeterminantalRepresentations", RemakeAllDocumentation => true)
 viewHelp "DeterminantalRepresentations"
 check "DeterminantalRepresentations"
 
---Cubic bivariate 
- 
-M = roundMatrix(5, matrix{{diag2_(0,0),diag2_(1,0),diag2_(2,0),0,0,0,0,0,0},{0,0,0,diag2_(0,0),diag2_(1,0),diag2_(2,0),0,0,0},{diag1_(0,0),0,0,diag1_(1,0),0,0,diag1_(2,0),0,0},{0,diag1_(0,0),0,0,diag1_(1,0),0,0,diag1_(2,0),0},{1,1,1,0,0,0,0,0,0},{0,0,0,1,1,1,0,0,0},{0,0,0,0,0,0,1,1,1},{1,0,0,1,0,0,1,0,0},{0,1,0,0,1,0,0,1,0}})
-s = roundMatrix(5, matrix{{D2#0},{D2#1},{D1#0},{D1#1},{1},{1},{1},{1},{1}})
 
-m=solve(M,s)
-v=gens ker M
-T=QQ[t]
-q11 = m_(0,0)+t*v_(0,0)
-q12 = m_(1,0)+t*v_(1,0)
-q21 = m_(3,0)+t*v_(3,0)
-q22 = m_(4,0)+t*v_(4,0)
-C = (1_T-q11-q12-q21-q22+q11*q22+q12*q21)^2 - 4*q11*q12*q21*q22
-roots C
-
---Examples of Cubic
-
-R=QQ[x1,x2]
-f=6*x1^3+36*x1^2*x2+11*x1^2+66*x1*x2^2+42*x1*x2+6*x1+36*x2^3+36*x2^2+11*x2+1
-matrixList = bivariateOrthogonal f
-G = toList((set{1,-1}) ^** 3) /deepSplice/toList/diagonalMatrix
-Q1 = matrixList#0
-removeOneOrbit = select(matrixList, A -> not any(G, g -> clean(1e-10, A - g*Q1) == 0));
-
-S = CC[gens R]
-D1=matrix{{3,0,0},{0,2,0},{0,0,1_S}}
-D2=matrix{{6,0,0},{0,3,0},{0,0,2_S}}
-Q = sub(Q1, S)
-clean(1e-10, sub(f, S) - det(id_(S^3) + S_0*D1 + S_1*(transpose Q)*D2*Q)) == 0
-
--- Random cubic
-A1 = random(R^3,R^3)
-A2 = random(R^3,R^3)
-(A1,A2) = (A1 + transpose A1, A2 + transpose A2)
-f = det(id_(R^3) + R_0*A1 + R_1*A2)
-
-
--- Degenerate cubic
+-- Degenerate cubic (fix!)
 R = QQ[x1,x2]
 f = 162*x1^3 - 23*x1^2*x2 + 99*x1^2 - 8*x1*x2^2 - 10*x1*x2 + 18*x1 + x2^3 - x2^2 - x2 + 1
 cubicBivariateOrthostochastic f
 
-
 -- Quartic examples
 R = QQ[x1,x2]
 f=(1/2)*(x1^4+x2^4-3*x1^2-3*x2^2+x1^2*x2^2)+1
-matrixList = bivariateOrthogonal f
+time matrixList = bivariateOrthogonal(f, Software => BERTINI) -- SLOW!
 
-f=24*x1^4+(49680/289)*x1^3*x2+50*x1^3+(123518/289)*x1^2*x2^2+(72507/289)*x1^2*x2+35*x1^2+(124740/289)*x1*x2^3+(112402/289)*x1*x2^2+(32022/289)*x1*x2+10*x1+144*x2^4+180*x2^3+80*x2^2+15*x2+1
-
--- Random quartic
-A1 = random(R^4,R^4)
-A2 = random(R^4,R^4)
-(A1,A2) = (A1 + transpose A1, A2 + transpose A2)
-f = det(id_(R^4) + R_0*A1 + R_1*A2)
-
-
-clearAll
-R = RR[x,y];A = sub(diagonalMatrix{5,6,7,8},R);f = det(id_(R^4) + x*sub(diagonalMatrix {1,2,3,4},R) + y*A);
-
-R = RR[x,y]
-A = sub(diagonalMatrix{5,6,7,8},R)
-f = det(id_(R^4) + x*sub(diagonalMatrix {1,2,3,4},R) + y*A)
-bivariateSystem f -- diagonal case
-A = sub(random(ZZ^4,ZZ^4), R)
-f = det(id_(R^4) + x*sub(diagonalMatrix {1,2,3,4},R) + y*(A + transpose A))
-f = det(id_(R^4) + x*sub(diagonalMatrix {4,3,2,1},R) + y*(A + transpose A))
+f = 24*x1^4+(49680/289)*x1^3*x2+50*x1^3+(123518/289)*x1^2*x2^2+(72507/289)*x1^2*x2+35*x1^2+(124740/289)*x1*x2^3+(112402/289)*x1*x2^2+(32022/289)*x1*x2+10*x1+144*x2^4+180*x2^3+80*x2^2+15*x2+1
 bivariateSystem f
 
-
--- Quintic
-
-mons := matrix{{R_1^2, R_0*R_1^2, R_0^2*R_1^2, R_1^3, R_0*R_1^3, R_1^4, R_0^3*R_1^2, R_0^2*R_1^3, R_0*R_1^4, R_1^5}};
-S = R/(ideal gens R)^6
-sort flatten entries lift(super basis(ideal(S_1^2)), R)
-
+-- Higher degree bivariate
+n = 5
 R = RR[x,y]
-A = sub(random(ZZ^5,ZZ^5),R)
-f = det(id_(R^5) + x*sub(diagonalMatrix {1,2,3,4,5},R) + y*(A + transpose A))
-
--- bivariateOrthogonal test
-
-U = QQ[a_(1,1)..a_(3,3)]
-L = ideal(a_(1,1)-(5-2*a_(1,2))/8, a_(1,3) - (3-6*a_(1,2))/8, a_(2,1) - (1+2*a_(1,2))/4, a_(2,2) - (1-2*a_(1,2)), a_(2,3) - (6*a_(1,2)-1)/4, a_(3,1) - (1-2*a_(1,2))/8, a_(3,3) - (7-6*a_(1,2))/8, a_(3,2) - a_(1,2))
-I = sub(L, apply(gens U, v -> v => v^2))
-A = genericMatrix(U,3,3)
-O = minors(1, A*transpose A - id_(U^3))
-J = I + O
-time PD = primaryDecomposition J
-#PD
-PD/radical
+f = det(id_(R^n) + x*sub(diagonalMatrix toList(1..n),R) + y*randomIntegerSymmetric(n, R))
