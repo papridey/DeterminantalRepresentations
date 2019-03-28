@@ -25,7 +25,7 @@ export {
     "liftRealMatrix",
     "hadamard",
     "isOrthogonal",
-    "isDoublystochastic",
+    "isDoublyStochastic",
     "randomIntegerSymmetric",
     "randomOrthogonal"
 }
@@ -67,7 +67,7 @@ cubicBivariateDetRep RingElement := List => opts -> f -> (
     q22 := (diag1#1-D1#2-S_0*(D1#0-D1#2))/(D1#1-D1#2);
     Q := matrix{{q11,S_0,1-S_0-q11},{q21,q22,1-q21-q22},{1-q11-q21,1-S_0-q22,1-(1-S_0-q11)-(1-q21-q22)}};
     L0 := apply(roots((1-q11-q22-S_0-q21+q11*q22+S_0*q21)^2-4*q11*q22*S_0*q21), r -> liftRealMatrix sub(Q,S_0=>r));
-    L := flatten apply(select(L0, isDoublystochastic), M -> orthogonalFromOrthostochastic(M, opts));
+    L := flatten apply(select(L0, isDoublyStochastic), M -> orthogonalFromOrthostochastic(M, opts));
     if ultimate(coefficientRing, ring f) === QQ then (
         numDigits := ceiling(-log_10(opts.Tolerance));
         (D1, D2) = (D1/round_numDigits, D2/round_numDigits);
@@ -99,8 +99,8 @@ bivariateDetRep RingElement := List => opts -> f -> (
     R := ring f;
     d := first degree f;
     y := getSymbol "y";
-    if opts.Strategy == "DirectSystem" then ( -- via solving polynomial system numerically
-        D := flatten entries D1;
+    (A1, A2) := (D1, D2)/(M -> sub(diagonalMatrix M, R));
+    matrixList := if opts.Strategy == "DirectSystem" then ( -- via solving polynomial system numerically
         S := R/(ideal gens R)^(d+1);
         mons := lift(super basis(ideal(S_1^2)), R);
         C := last coefficients(f, Monomials => mons);
@@ -108,12 +108,15 @@ bivariateDetRep RingElement := List => opts -> f -> (
         S = T(monoid[gens R]);
         A := genericSkewMatrix(T, d);
         B := matrix table(d, d, (i,j) -> if i == j then diag2_(i,0) else A_(min(i,j),max(i,j)));
-        G := det(id_(S^d) + S_0*sub(diagonalMatrix D, S) + S_1*sub(B, S));
+        G := det(id_(S^d) + S_0*sub(diagonalMatrix D1, S) + S_1*sub(B, S));
         C1 := last coefficients(G, Monomials => sub(mons, S)) - sub(C, S);
         P := polySystem sub(clean(opts.Tolerance, C1), T);
         print ("Solving " | binomial(d,2) | " x " | binomial(d,2) | " polynomial system...");
         elapsedTime sols := select(solveSystem(P, Software => opts.Software), p -> not status p === RefinementFailure);
-        realPoints apply(sols, p -> point{p#Coordinates/clean_(opts.Tolerance)})
+        realSols := realPoints apply(sols, p -> point{p#Coordinates/clean_(opts.Tolerance)});
+        indices := sort subsets(d, 2);
+        H := hashTable apply(binomial(d,2), i -> indices#i => i);
+        apply(realSols/(p -> p#Coordinates/realPart), sol -> matrix table(d, d, (i,j) -> if i == j then (diag2_(i,0))_R else sol#(H#{min(i,j),max(i,j)})))
     ) else if opts.Strategy == "Orthogonal" then ( -- via orthogonal matrices
         T = RR(monoid[y_0..y_(d^2-1)]);
         A = genericMatrix(T,d,d);
@@ -124,9 +127,10 @@ bivariateDetRep RingElement := List => opts -> f -> (
         J := minors(1, A*transpose A - id_(T^d)) + sub(L + rowsum + colsum, apply(gens T, v -> v => v^2));
         print "Computing orthogonal matrices numerically ...";
         elapsedTime N := numericalIrreducibleDecomposition(J, Software => opts.Software);
-        rawPts := apply(N#0, W -> matrix pack(d,W#Points#0#Coordinates));
-        select(rawPts/clean_(opts.Tolerance), M -> unique(flatten entries M/imaginaryPart) == {0_RR})
-    )
+        realSols = realPoints apply(N#0, W -> point{W#Points#0#Coordinates/clean_(opts.Tolerance)});
+        apply(realSols/(p -> sub(matrix pack(d, p#Coordinates/realPart), R)), M -> transpose M*A2*M)
+    );
+    apply(matrixList, M -> {A1, M})
 )
 
 -- Helper functions for bivariate case
@@ -140,7 +144,7 @@ bivariateDiagEntries RingElement := Sequence => opts -> f -> ( -- returns diagon
     (r1, r2) := (f1, f2)/roots;
     D1 := reverse sort(apply(r1,r -> -1/r) | toList(d-#r1:0));
     D2 := reverse sort(apply(r2,r -> -1/r) | toList(d-#r2:0));
-    if not all(D1 | D2, r -> clean(opts.Tolerance, imaginaryPart r) == 0) then error("Not a real zero polynomial - no determinantal representation of size " | d);
+    if not all(D1 | D2, r -> clean(opts.Tolerance, imaginaryPart r) == 0) then error("Not a real zero polynomial - no monic symmetric determinantal representation of size " | d);
     (D1, D2) = (D1/realPart, D2/realPart);
     C1 := last coefficients(f, Monomials => apply(d, i -> R_{1,i}));
     G1 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D2_s))), RR);
@@ -234,8 +238,8 @@ isOrthogonal Matrix := Boolean => opts -> A -> (
     delta == 0
 )
 
-isDoublystochastic = method(Options => options quadraticDetRep)
-isDoublystochastic Matrix := Boolean => opts -> A -> (
+isDoublyStochastic = method(Options => options quadraticDetRep)
+isDoublyStochastic Matrix := Boolean => opts -> A -> (
     n := numcols A;
     if not numrows A == n then ( if debugLevel > 0 then print "Not a square matrix"; return false; );
     if not class(ultimate(coefficientRing, ring A)) === RealField then ( if debugLevel > 0 then print "Not a real matrix"; return false; );
@@ -423,7 +427,10 @@ doc ///
         Example
             R = RR[x1, x2]
             f=(1/2)*(x1^4+x2^4-3*x1^2-3*x2^2+x1^2*x2^2)+1
-            bivariateDetRep f
+            repList = bivariateDetRep f;
+            #repList
+            L = repList#0
+            clean(1e-10, f - det(id_(R^4) + R_0*L#0 + R_1*L#1))
     Caveat
         As this algorithm implements relatively brute-force algorithms, it may not 
         terminate for polynomials of large degree (e.g. degree >= 5).
@@ -558,13 +565,13 @@ doc ///
 
 doc ///
     Key
-        isDoublystochastic
-        (isDoublystochastic, Matrix)
-        [isDoublystochastic, Tolerance]
+        isDoublyStochastic
+        (isDoublyStochastic, Matrix)
+        [isDoublyStochastic, Tolerance]
     Headline
         whether a matrix is doubly stochastic
     Usage
-        isDoublystochastic A
+        isDoublyStochastic A
     Inputs
         A:Matrix
     Outputs
@@ -583,7 +590,7 @@ doc ///
         Example
             O = randomOrthogonal 3
             A = hadamard(O, O)
-            isDoublystochastic A
+            isDoublyStochastic A
 ///
 
 doc ///
@@ -825,6 +832,13 @@ assert(orthogonalFromOrthostochastic M === {})
 assert(clean(1e-4, first(O1 - orthogonalFromOrthostochastic(M, Tolerance => 1e-4))) == 0)
 ///
 
+TEST /// -- degenerate cases
+R = RR[x,y]
+f = (x+y+1)^3
+f = (x+y+1)*(x + 2*y + 1)*(x + 3*y + 1)
+f = (x+y+1)*(2*x + y + 1)*(3*x + 2*y + 1)
+///
+
 TEST /// -- Quartic case tests
 R=QQ[x1,x2]
 eps = 1e-10
@@ -862,18 +876,18 @@ P = det(id_(R^n) + x_1*A + x_2*B + x_3*C);
 assert((last coefficients(P, Monomials => {x_1*x_2*x_3}))_(0,0) == generalizedMixedDiscriminant({A,B,C}))
 ///
 
-TEST /// -- isOrthogonal, isDoublystochastic tests
+TEST /// -- isOrthogonal, isDoublyStochastic tests
 assert(isOrthogonal id_(ZZ^5))
 assert(isOrthogonal id_(QQ^5))
 assert(isOrthogonal id_((CC[x,y])^5))
 R = RR[x,y]
 I = id_(R^5)
-assert(isOrthogonal I and isDoublystochastic I)
+assert(isOrthogonal I and isDoublyStochastic I)
 assert(clean(1e-10, hadamard(I, I) - I) == 0)
 O1 = randomOrthogonal 5
 A = hadamard(O1, O1)
 O = first orthogonalFromOrthostochastic A
-assert(isOrthogonal O and isDoublystochastic A and clean(1e-10, hadamard(O, O) - A) == 0)
+assert(isOrthogonal O and isDoublyStochastic A and clean(1e-10, hadamard(O, O) - A) == 0)
 ///
 
 end--
@@ -887,17 +901,18 @@ check "DeterminantalRepresentations"
 
 
 -- Degenerate cubic (fix!)
-R = QQ[x1,x2]
+R = RR[x1,x2]
 f = 162*x1^3 - 23*x1^2*x2 + 99*x1^2 - 8*x1*x2^2 - 10*x1*x2 + 18*x1 + x2^3 - x2^2 - x2 + 1
 cubicBivariateOrthostochastic f
 
 -- Quartic examples
-R = QQ[x1,x2]
+R = RR[x1,x2]
 f=(1/2)*(x1^4+x2^4-3*x1^2-3*x2^2+x1^2*x2^2)+1
-time matrixList = bivariateOrthogonal(f, Software => BERTINI) -- SLOW!
+reps = bivariateDetRep f;
+all(reps, A -> clean(1e-10, f - det(id_(R^4) + R_0*sub(A#0,R) + R_1*sub(A#1,R))) == 0)
+time repList = bivariateDetRep(f, Strategy => "Orthogonal", Software => BERTINI) -- SLOW!
 
 f = 24*x1^4+(49680/289)*x1^3*x2+50*x1^3+(123518/289)*x1^2*x2^2+(72507/289)*x1^2*x2+35*x1^2+(124740/289)*x1*x2^3+(112402/289)*x1*x2^2+(32022/289)*x1*x2+10*x1+144*x2^4+180*x2^3+80*x2^2+15*x2+1
-bivariateSystem f
 
 -- Higher degree bivariate
 n = 5
@@ -929,7 +944,7 @@ doc ///
             This method returns a random orthostochastic matrix of a given size $n$. 
             A real square matrix $A$ is said to be orthostochastic if there is an orthogonal
             matrix $V$ whose Hadamard square is $A$. Note that an orthostochastic matrix
-            is necessarily @TO2{isDoublystochastic, "doubly stochastic"}@. This method 
+            is necessarily @TO2{isDoublyStochastic, "doubly stochastic"}@. This method 
             is a combination of the methods @TO randomOrthogonal@ and 
             @TO hadamard@.
             
@@ -940,9 +955,9 @@ doc ///
             
         Example
             A3 = randomOrthostochastic 3
-            isDoublystochastic A3
+            isDoublyStochastic A3
             time A10 = randomOrthostochastic 10
-            isDoublystochastic(A10, Tolerance => 1e-8)
+            isDoublyStochastic(A10, Tolerance => 1e-8)
     SeeAlso
         randomOrthogonal
         hadamard
@@ -985,3 +1000,30 @@ sol1 = point {{1}}
 sol2 = point {{ -1}}
 S1= { sol1, sol2  }
 S0 = bertiniUserHomotopy (t,{a=>t}, H, S1)
+
+
+------------------------------------------------------------------
+
+needsPackage "NumericalImplicitization"
+P2 = CC[x_0..x_2]
+P3 = CC[z_0..z_3]
+S = P2 ** P3
+X = sub(matrix pack(1, gens P2), S)
+Z = sub(vars P3, S)
+M = sub(random(P3^3,P3^{3:-1}), S)
+L = matrix apply(flatten entries(M*X), e -> {transpose(e // Z)})
+I = sub(minors(3, L), P2)
+time pts = apply((numericalIrreducibleDecomposition I)#1, p -> p#Points#0#Coordinates)
+-- Get line through 2 points
+pair = pts_{0,1}
+newpair = {pair#0 + pair#1, pair#0 - pair#1}
+q = matrix apply(newpair, p -> {sub(gens I, matrix{p})})
+l = sub(Z*gens ker q, P3)
+-- clean(1e-10, sub(l, q^{1}))
+
+
+q0 = sub(gens I, apply(#gens ring I, i -> (ring I)_i => newpair#0#i))
+q1 = sub(gens I, apply(#gens ring I, i -> (ring I)_i => newpair#1#i))
+P1 = CC[s,t]
+l0 = extractImageEquations(s*sub(q0, P1) + t*sub(q1, P1), ideal 0_P1, 1)
+l = (map(P3, ring l0, gens P3))(l0) -- off by a conjugate in some terms
