@@ -72,6 +72,7 @@ cubicBivariateDetRep = method(Options => options quadraticDetRep)
 cubicBivariateDetRep RingElement := List => opts -> f -> (
     (D1, D2, diag1, diag2) := bivariateDiagEntries(f, opts)/entries/flatten;
     if first degree f > 3 then error "Not a cubic polynomial";
+    k := ultimate(coefficientRing, ring f);
     S := RR(monoid[getSymbol "q12"]);
     if #uniqueUpToTol(D2, opts) == 1 then (
         print "3-dimensional eigenspace";
@@ -88,14 +89,15 @@ cubicBivariateDetRep RingElement := List => opts -> f -> (
     );
     Q := clean(opts.Tolerance, matrix{{q11,S_0,1-S_0-q11},{q21,q22,1-q21-q22},{1-q11-q21,1-S_0-q22,1-(1-S_0-q11)-(1-q21-q22)}}); print Q;
     L0 := apply(roots((1-q11-q22-S_0-q21+q11*q22+S_0*q21)^2-4*q11*q22*S_0*q21), r -> liftRealMatrix sub(Q,S_0=>r));
-    L := flatten apply(select(L0, isDoublyStochastic), M -> orthogonalFromOrthostochastic(M, opts));
-    if ultimate(coefficientRing, ring f) === QQ then (
+    L := flatten apply(select(clean(opts.Tolerance, L0), isDoublyStochastic), M -> orthogonalFromOrthostochastic(M, opts));
+    if k === QQ then (
         numDigits := ceiling(-log_10(opts.Tolerance));
         (D1, D2) = (D1/round_numDigits, D2/round_numDigits);
-        L = L/roundMatrix_numDigits;
+        L = L/roundMatrix_numDigits; print("Rounded matrices: " | toString L);
     );
-    (D1, D2) = (D1, D2)/diagonalMatrix/(A -> sub(A, ring f));
-    uniqueUpToTol(apply(L/(A -> sub(A, ring f)), M -> {D1, M*D2*transpose M}), Tolerance => opts.Tolerance)
+    (D1, D2) = (D1, D2)/diagonalMatrix_k;
+    L = uniqueUpToTol(apply(L, M -> {D1, M*D2*transpose M}), opts);
+    clean(opts.Tolerance, L)/(l -> l/(A -> sub(A, ring f)))
 )
 
 orthogonalFromOrthostochastic = method(Options => options quadraticDetRep)
@@ -291,14 +293,15 @@ cholesky Matrix := Matrix => opts -> A -> (
     n := numcols A;
     if not n == numrows A then error "Expected square matrix";
     if not clean(opts.Tolerance, A - transpose A) == 0 then error "Expected symmetric matrix";
+    if not min clean(opts.Tolerance, eigenvalues A) >= 0 then error "Expected positive definite matrix";
     L := new MutableHashTable;
     for i from 0 to n-1 do (
 	for j from 0 to i do (
-	    L#(i,j) = if i == j then sqrt(A_(i,j) - sum apply(j, k -> (L#(j,k))^2))
-	    else (1/L#(j,j))*(A_(i,j) - sum apply(j, k -> L#(i,k)*L#(j,k)));
+	    L#(i,j) = if i == j then sqrt(max(0, A_(i,j) - sum apply(j, k -> (L#(j,k))^2)))
+	    else if L#(j,j) == 0 then 0 else (1/L#(j,j))*(A_(i,j) - sum apply(j, k -> L#(i,k)*L#(j,k)));
     	)
     );
-    matrix table(n, n, (i,j) -> if i >= j then L#(i,j) else 0)
+    clean(opts.Tolerance, matrix table(n, n, (i,j) -> if i >= j then L#(i,j) else 0))
 )
 
 -- Documentation --
@@ -833,13 +836,17 @@ doc ///
             This method computes the Cholesky decomposition of a symmetric positive
             semidefinite matrix $A$. The Cholesky decomposition is a factorization
             $A = LL^T$, where $L$ is lower-triangular. This method computes such a
-            matrix $L$ (note: if $A$ is not positive-definite, then the Cholesky 
-            decomposition is not unique).
+            matrix $L$. If $A$ is not positive-definite, then the Cholesky 
+            decomposition is not unique - in this case, this method will attempt to
+	    give an output which is as sparse as possible.
                  
         Example
             A = randomPSD 5
             L = cholesky A
             clean(1e-12, A - L*transpose L) == 0
+	    B = randomPSD(7, 3)
+	    L = cholesky B
+	    clean(1e-12, B - L*transpose L) == 0
 ///
 
 doc ///
@@ -956,8 +963,7 @@ A1 = randomPSD d;
 f1 = ((vars R)*(-1)*A1*transpose vars R + vars R*random(RR^d,RR^1) + 1)_(0,0)
 M = quadraticDetRep f1
 assert(clean(1e-12, f1 - det M) == 0)
-O = randomOrthogonal(d, RR)
-A2 = O*diagonalMatrix(toList apply(d-3, i -> random(0.0, 1.0)) | {0,0,0})*transpose O
+A2 = randomPSD(d, d//2)
 f2 = ((vars R)*(-1)*A2*transpose vars R + vars R*random(RR^d,RR^1) + 1)_(0,0)
 M = quadraticDetRep f2
 assert(clean(1e-12, f2 - det M) == 0)
@@ -978,6 +984,7 @@ TEST /// -- threshold tests
 M = matrix{{0.5322,0.3711,0.0967},{0.4356,0.2578,0.3066},{0.0322,0.3711,0.5967}}
 assert(orthogonalFromOrthostochastic M === {})
 assert(#orthogonalFromOrthostochastic(M, Tolerance => 1e-4) > 0)
+R = RR[x,y]
 f = det(id_(R^3)*(1 + R_0*2.92837 + R_1*4.173841))
 assert((try cubicBivariateDetRep f) === null)
 assert(#cubicBivariateDetRep(f, Tolerance => 1e-4) == 1)
@@ -985,11 +992,19 @@ assert(#cubicBivariateDetRep(f, Tolerance => 1e-4) == 1)
 
 TEST /// -- degenerate cases
 R = RR[x,y]
-f = (2*x - 5*y + 1)^3
-cubicBivariateDetRep f
-f = (-7*x+y+1)*(-7*x + 2*y + 1)*(-7*x + 3*y + 1)
-f = (-7*x+y+1)*(2*x + 2*y + 1)*(3*x + 2*y + 1)
-f = (2*x+y+1)*(2*x + 2*y + 1)*(2*x + 2*y + 1)
+f = (2*x - 5*y + 1)^3 -- D1, D2 repeated of mult. 3
+assert(#cubicBivariateDetRep f == 1)
+f = (-7*x+y+1)*(-7*x + 2*y + 1)*(-7*x + 3*y + 1) -- D1 repeated of mult. 3, D2 distinct
+assert(#cubicBivariateDetRep f == 1)
+f = (2*x+y+1)*(2*x + 2*y + 1)*(2*x + 2*y + 1) -- D1, D2 repeated of mult. 3, 2 resp.
+assert(#cubicBivariateDetRep f == 1)
+f = (-7*x+y+1)*(2*x + 2*y + 1)*(3*x + 2*y + 1) -- D1 distinct, D2 repeated of mult. 2
+g = sub(f, {R_0 => R_1, R_1 => R_0}) -- switch D1 <-> D2
+rep1 = cubicBivariateDetRep f
+rep2 = cubicBivariateDetRep g
+assert(clean(1e-10, f - det(id_(R^3) + R_0*rep1#0#0 + R_1*rep1#0#1)) == 0)
+assert(clean(1e-10, g - det(id_(R^3) + R_0*rep2#0#0 + R_1*rep2#0#1)) == 0)
+
 ///
 
 TEST /// -- Quartic case tests
@@ -999,7 +1014,7 @@ A = randomIntegerSymmetric(n, R)
 f = det(id_(R^n) + R_0*diagonalMatrix {4,3,2,1_R} + R_1*A)
 (D1, D2, diag1, diag2) = bivariateDiagEntries f
 elapsedTime sols = bivariateDetRep f;
-assert(all(sols, r -> clean(1e-7, f - det(id_(R^4) + R_0*r_0 + R_1*r_1)) == 0))
+assert(all(sols, r -> clean(1e-6, f - det(id_(R^4) + R_0*r_0 + R_1*r_1)) == 0))
 ///
 
 TEST /// -- Generalized mixed discriminant
