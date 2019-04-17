@@ -1,7 +1,7 @@
 newPackage("DeterminantalRepresentations",
 	AuxiliaryFiles => false,
-	Version => "0.0.5",
-	Date => "March 3, 2019",
+	Version => "0.0.6",
+	Date => "April 17, 2019",
 	Authors => {
 		{Name => "Justin Chen",
 		Email => "jchen646@gatech.edu"},
@@ -21,39 +21,49 @@ export {
     "bivariateDiagEntries",
     "orthogonalFromOrthostochastic",
     "generalizedMixedDiscriminant",
+    -- "uniqueUpToTol",
     "roundMatrix",
     "liftRealMatrix",
     "hadamard",
     "isOrthogonal",
     "isDoublyStochastic",
     "randomIntegerSymmetric",
-    "randomOrthogonal"
+    "randomOrthogonal",
+    "randomPSD",
+    "cholesky"
 }
 
 -- Quadratic case
 
 quadraticDetRep = method(Options => {Tolerance => 1e-6})
 quadraticDetRep RingElement := List => opts -> f -> ( -- returns a list of matrices over original ring R
+    if first degree f > 2 then error "Not a quadratic polynomial";
     R := ring f;
     n := #gens R;
     k := ultimate(coefficientRing, R);
     b := sub(last coefficients(f, Monomials => gens R), k);
     A := sub(matrix table(n, n, (i,j) -> if i == j then (last coefficients(f, Monomials => {R_i^2}))_(0,0) else (1/2)*(last coefficients(f, Monomials => {R_i*R_j}))_(0,0)), k);
     Q := (1/4)*b*transpose(b) - A;
-    E := eigenvectors(Q, Hermitian => true);
-    E = (E#0/clean_(opts.Tolerance), E#1);
-    if not all(E#0, e -> e >= 0) then ( print "Not all eigenvalues nonnegative!"; return false; );
-    if #select(E#0, e -> not(e == 0)) > 3 then ( print("Rank of matrix Q is " | rank(Q) | " (too large)!"); return false; );
-    posEvalues := positions(E#0, e -> e > 0);
-    posEvectors := apply(posEvalues, i -> (E#0#i,matrix E#1_i));
-    r := (1/2)*b + sqrt(posEvectors#0#0)*posEvectors#0#1;
-    s := (1/2)*b - sqrt(posEvectors#0#0)*posEvectors#0#1;
-    t := if #posEvalues >= 2 then sqrt(posEvectors#1#0)*posEvectors#1#1 else 0*b;
-    u := if #posEvalues == 3 then sqrt(posEvectors#2#0)*posEvectors#2#1 else 0*b;
-    L := apply(n, i -> matrix{{r_(i,0),t_(i,0) - ii*u_(i,0)},{t_(i,0)+ii*u_(i,0),s_(i,0)}});
-    if not class k === ComplexField then L = L/liftRealMatrix/clean_(opts.Tolerance);
-    if k === QQ then L = L/roundMatrix_(ceiling(log_10(1/opts.Tolerance)));
-    apply(L, M -> sub(M, R))
+    E := clean(opts.Tolerance, eigenvectors(Q, Hermitian => true));
+    if all(E#0, e -> e >= 0) and #select(E#0, e -> not(e == 0)) <= 3 then (
+        posEvalues := positions(E#0, e -> e > 0);
+        posEvectors := apply(posEvalues, i -> (E#0#i,matrix E#1_i));
+        r := (1/2)*b + sqrt(posEvectors#0#0)*posEvectors#0#1;
+        s := (1/2)*b - sqrt(posEvectors#0#0)*posEvectors#0#1;
+        t := if #posEvalues >= 2 then sqrt(posEvectors#1#0)*posEvectors#1#1 else 0*b;
+        u := if #posEvalues == 3 then sqrt(posEvectors#2#0)*posEvectors#2#1 else 0*b;
+        L := apply(n, i -> matrix{{r_(i,0),t_(i,0) - ii*u_(i,0)},{t_(i,0)+ii*u_(i,0),s_(i,0)}});
+        if not class k === ComplexField then L = L/liftRealMatrix/clean_(opts.Tolerance);
+        if k === QQ then L = L/roundMatrix_(ceiling(log_10(1/opts.Tolerance)));
+        apply(L, M -> sub(M, R))
+    ) else (
+        E = clean(opts.Tolerance, eigenvectors(A, Hermitian => true));
+        if any(E#0, e -> e > 0) then ( print "No determinantal representation"; return; );
+        C := cholesky((-1)*A, opts);
+        if not class k === ComplexField then C = clean(opts.Tolerance, liftRealMatrix C);
+        if k === QQ then C = roundMatrix(ceiling(log_10(1/opts.Tolerance)), C);
+        (id_(R^n) | transpose C*transpose vars R) || ((vars R*C) | matrix{{1+(vars R)*b}})
+    )
 )
 
 -- Cubic bivariate case
@@ -61,11 +71,22 @@ quadraticDetRep RingElement := List => opts -> f -> ( -- returns a list of matri
 cubicBivariateDetRep = method(Options => options quadraticDetRep)
 cubicBivariateDetRep RingElement := List => opts -> f -> (
     (D1, D2, diag1, diag2) := bivariateDiagEntries(f, opts)/entries/flatten;
+    if first degree f > 3 then error "Not a cubic polynomial";
     S := RR(monoid[getSymbol "q12"]);
-    q11 := (diag2#0-D2#2-S_0*(D2#1-D2#2))/(D2#0-D2#2);
-    q21 := (-(D1#0-D1#2)*(diag2#0-D2#2-S_0*(D2#1-D2#2))+(D2#0-D2#2)*(diag1#0-D1#2))/((D1#1-D1#2)*(D2#0-D2#2));
-    q22 := (diag1#1-D1#2-S_0*(D1#0-D1#2))/(D1#1-D1#2);
-    Q := matrix{{q11,S_0,1-S_0-q11},{q21,q22,1-q21-q22},{1-q11-q21,1-S_0-q22,1-(1-S_0-q11)-(1-q21-q22)}};
+    if #uniqueUpToTol(D2, opts) == 1 then (
+        print "3-dimensional eigenspace";
+        return {{D1, D2}/diagonalMatrix/(A -> sub(A, ring f))};
+    );
+    if #uniqueUpToTol(D1, opts) == 2 and #uniqueUpToTol(D2, opts) == 2 then (
+        q11 := (diag2#0-D2#2)/(D2#0-D2#2) - S_0;
+        q22 := (diag1#0-D2#2)/(D1#0-D1#2) - S_0;
+        q21 := (diag2#1-D2#2)/(D2#0-D2#2) - (diag1#0-D2#2)/(D1#0-D1#2) - S_0;
+    ) else (
+        q11 = (diag2#0-D2#2-S_0*(D2#1-D2#2))/(D2#0-D2#2);
+        q22 = (diag1#1-D1#2-S_0*(D1#0-D1#2))/(D1#1-D1#2);
+        q21 = (diag1#0-D1#2)/(D1#1-D1#2)-((D1#0-D1#2)*(diag2#0-D2#2-S_0*(D2#1-D2#2)))/((D1#1-D1#2)*(D2#0-D2#2));
+    );
+    Q := clean(opts.Tolerance, matrix{{q11,S_0,1-S_0-q11},{q21,q22,1-q21-q22},{1-q11-q21,1-S_0-q22,1-(1-S_0-q11)-(1-q21-q22)}}); print Q;
     L0 := apply(roots((1-q11-q22-S_0-q21+q11*q22+S_0*q21)^2-4*q11*q22*S_0*q21), r -> liftRealMatrix sub(Q,S_0=>r));
     L := flatten apply(select(L0, isDoublyStochastic), M -> orthogonalFromOrthostochastic(M, opts));
     if ultimate(coefficientRing, ring f) === QQ then (
@@ -74,8 +95,7 @@ cubicBivariateDetRep RingElement := List => opts -> f -> (
         L = L/roundMatrix_numDigits;
     );
     (D1, D2) = (D1, D2)/diagonalMatrix/(A -> sub(A, ring f));
-    L = L/(A -> sub(A, ring f));
-    apply(L, M -> {D1, M*D2*transpose M})
+    uniqueUpToTol(apply(L/(A -> sub(A, ring f)), M -> {D1, M*D2*transpose M}), Tolerance => opts.Tolerance)
 )
 
 orthogonalFromOrthostochastic = method(Options => options quadraticDetRep)
@@ -111,7 +131,7 @@ bivariateDetRep RingElement := List => opts -> f -> (
         G := det(id_(S^d) + S_0*sub(diagonalMatrix D1, S) + S_1*sub(B, S));
         C1 := last coefficients(G, Monomials => sub(mons, S)) - sub(C, S);
         P := polySystem sub(clean(opts.Tolerance, C1), T);
-        print ("Solving " | binomial(d,2) | " x " | binomial(d,2) | " polynomial system...");
+        print ("Solving " | binomial(d,2) | " x " | binomial(d,2) | " polynomial system ...");
         elapsedTime sols := select(solveSystem(P, Software => opts.Software), p -> not status p === RefinementFailure);
         realSols := realPoints apply(sols, p -> point{p#Coordinates/clean_(opts.Tolerance)});
         indices := sort subsets(d, 2);
@@ -138,6 +158,7 @@ bivariateDetRep RingElement := List => opts -> f -> (
 bivariateDiagEntries = method(Options => options quadraticDetRep)
 bivariateDiagEntries RingElement := Sequence => opts -> f -> ( -- returns diagonal entries and eigenvalues of coefficient matrices
     R := ring f;
+    if #gens R > 2 then error "Not a bivariate polynomial";
     d := first degree f;
     (R1, R2) := ((coefficientRing R)(monoid[R_0]), (coefficientRing R)(monoid[R_1]));
     (f1, f2) := (sub(sub(f, R_1 => 0), R1), sub(sub(f, R_0 => 0), R2));
@@ -146,12 +167,14 @@ bivariateDiagEntries RingElement := Sequence => opts -> f -> ( -- returns diagon
     D2 := reverse sort(apply(r2,r -> -1/r) | toList(d-#r2:0));
     if not all(D1 | D2, r -> clean(opts.Tolerance, imaginaryPart r) == 0) then error("Not a real zero polynomial - no monic symmetric determinantal representation of size " | d);
     (D1, D2) = (D1/realPart, D2/realPart);
+    if #uniqueUpToTol D2 == 1 then return (D1, D2, {}, {})/(L -> transpose matrix{L})
+    else if #uniqueUpToTol D1 == 1 then return (D2, D1, {}, {})/(L -> transpose matrix{L});
     C1 := last coefficients(f, Monomials => apply(d, i -> R_{1,i}));
     G1 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D2_s))), RR);
-    diag1 := addScaleToMajorize(flatten entries solve(G1, sub(C1,RR)), D1, gens ker G1, opts);
+    diag1 := addScaleToMajorize(flatten entries solve(G1, sub(C1,RR), ClosestFit => true), D1, gens ker G1, opts);
     C2 := last coefficients(f, Monomials => apply(d, i -> R_{i,1}));
     G2 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D1_s))), RR);
-    diag2 := addScaleToMajorize(flatten entries solve(G2, sub(C2,RR)), D2, gens ker G2, opts);
+    diag2 := addScaleToMajorize(flatten entries solve(G2, sub(C2,RR), ClosestFit => true), D2, gens ker G2, opts);
     (D1, D2, diag1, diag2)/(L -> transpose matrix{L})
 )
 
@@ -176,26 +199,7 @@ isMajorized (List, List) := Boolean => opts -> (v, w) -> (
     all(#v, k -> clean(opts.Tolerance, sum(w_{0..k}) - sum(v_{0..k})) >= 0)
 )
 
-getDescendingSort = method()
-getDescendingSort List := List => L -> (
-    H := hashTable (identity, apply(#L, i -> L#i => i)); 
-    splice apply(rsort keys H, k -> H#k)
-)
-
---Compute Generalized Mixed discriminant of matrices
-
-makeUvector = method()
-makeUvector (List, ZZ) := List => (D, k) -> (
-    Nk := subsets(#D,k);
-    transpose matrix{apply(Nk, s -> product(s, i -> D_i))}
-)
-
-makeUComp = method()
-makeUComp (List, ZZ, ZZ) := List => (D, k, l) -> (
-    Nk := subsets(#D, k);
-    Nl := subsets(#D, l);
-    transpose matrix{apply(Nl, s -> sum flatten((select(Nk, t -> #((set t)*(set s)) == 0))/(S -> product(D_S))))}
-)
+--Generalized mixed discriminant
 
 generalizedMixedDiscriminant = method()
 generalizedMixedDiscriminant List := RingElement => L -> (
@@ -203,12 +207,17 @@ generalizedMixedDiscriminant List := RingElement => L -> (
     m := #keys T;
     k := #L;
     n := numcols L#0;
-    Sk := subsets(n,k);
+    Sk := subsets(n, k);
     Skv := unique permutations flatten apply(m, i -> toList((T#((keys T)#i)):i));
     sum flatten table(Sk, Skv, (alpha, sigma) -> det matrix table(k, k, (i,j) -> ((keys T)#(sigma#i))_(alpha#i,alpha#j)))
 )
 
 -- General helper functions
+
+uniqueUpToTol = method(Options => options quadraticDetRep)
+uniqueUpToTol List := List => opts -> L -> delete(null, apply(#L, i -> if not any(i, j -> areEqual(L#i, L#j, opts)) then L#i))
+
+clean (RR,BasicList) := BasicList => (eps, L) -> L/clean_eps
 
 round (ZZ,CC) := (n,x) -> round(n, realPart x) + ii*round(n,imaginaryPart x)
 round (ZZ,ZZ) := (n,x) -> x
@@ -267,6 +276,31 @@ randomOrthogonal (ZZ, Thing) := Matrix => (n, R) -> (
 )
 randomOrthogonal ZZ := Matrix => n -> randomOrthogonal(n, RR)
 
+randomPSD = method()
+randomPSD (ZZ, ZZ, RR) := Matrix => (n, r, s) -> (
+    if r > n then error "Expected rank to be less than size";
+    O := randomOrthogonal(n, RR);
+    transpose O*diagonalMatrix(toList apply(r, i -> random(0.0, s)) | toList(n-r:0))*O
+)
+randomPSD (ZZ, RR) := Matrix => (n, s) -> randomPSD(n, n, s)
+randomPSD (ZZ, ZZ) := Matrix => (n, r) -> randomPSD(n, r, 1.0)
+randomPSD ZZ := Matrix => n -> randomPSD(n, n, 1.0)
+
+cholesky = method(Options => options quadraticDetRep)
+cholesky Matrix := Matrix => opts -> A -> (
+    n := numcols A;
+    if not n == numrows A then error "Expected square matrix";
+    if not clean(opts.Tolerance, A - transpose A) == 0 then error "Expected symmetric matrix";
+    L := new MutableHashTable;
+    for i from 0 to n-1 do (
+	for j from 0 to i do (
+	    L#(i,j) = if i == j then sqrt(A_(i,j) - sum apply(j, k -> (L#(j,k))^2))
+	    else (1/L#(j,j))*(A_(i,j) - sum apply(j, k -> L#(i,k)*L#(j,k)));
+    	)
+    );
+    matrix table(n, n, (i,j) -> if i >= j then L#(i,j) else 0)
+)
+
 -- Documentation --
 -- <<docTemplate
 
@@ -291,7 +325,7 @@ doc ///
             representation is called definite if $A_0$ is positive definite, and monic if 
             $A_0 = I_d$ is the identity matrix. 
             
-            Detecting whether or not a degree $d$ polynomial has a determinantal
+            Deciding whether or not a degree $d$ polynomial has a determinantal
             representation of size $d$ is difficult, and computing such a representation 
             even more so. Computing (monic) symmetric determinantal representations 
             of bivariate polynomials is of interest owing to a connection with real-zero and
@@ -303,6 +337,12 @@ doc ///
             symmetric determinantal representations of quadrics, as well as bivariate cubics
             and quartics. The algorithms implemented in this package can be found in 
             [Dey1], [Dey2].
+            
+            Additionally for convenience, a number of helper functions for creating/working
+            with various classes of matrices are also included. These include creating/testing
+            orthogonal, symmetric, doubly stochastic, and positive semidefinite matrices,
+            Hadamard products, Cholesky decomposition, and lifting/rounding matrices from
+            @TO CC@ to @TO RR@/@TO QQ@.
 ///
 
 doc ///
@@ -329,12 +369,20 @@ doc ///
             The option {\tt Tolerance} can be used to specify the internal threshold for
             checking equality (any floating point number below the tolerance is treated as
             numerically zero).
+            
+            If a quadratic determinantal representation of size $2$ exists, then it is 
+            returned. Otherwise, the method will find a determinantal representation of size
+            $n+1$, where $n$ is the number of variables (if it exists). If no monic symmetric
+            determinantal representation exists, then @TO null@ is returned.
         
         Example
             R = RR[x1, x2, x3, x4]
             f = 260*x1^2+180*x1*x2-25*x2^2-140*x1*x3-170*x2*x3-121*x3^2+248*x1*x4+94*x2*x4-142*x3*x4+35*x4^2+36*x1+18*x2+2*x3+20*x4+1
             time A = quadraticDetRep f
             clean(1e-10, f - det(id_(R^2) + sum(#gens R, i -> R_i*A#i)))
+            g = -61*x1^2-96*x1*x2-177*x2^2-126*x1*x3-202*x2*x3-86*x3^2-94*x1*x4-190*x2*x4-140*x3*x4-67*x4^2+8*x1+3*x2+5*x3+3*x4+1
+            time B = quadraticDetRep g
+            clean(1e-10, g - det B)
 ///
 
 doc ///
@@ -512,13 +560,13 @@ doc ///
             Given a $n\times n$ orthostochastic matrix $A$, there are $2^{n^2}$ possible
             matrices whose Hadamard square is $A$ (not all of which will be orthogonal in
             general though). Let $G\cong (\ZZ/2\ZZ)^n$ be the group of diagonal matrices 
-            with diagonal entries equal to &plusmn;1. One can act (on the left and right) by 
-            $G\times G$ on the set of orthogonal matrices whose Hadamard square is $A$.
-            This method computes all such orthogonal matrices, modulo the action of 
-            $G\times G$. The representative for each orbit is chosen so that the first row 
-            and column will have nonnegative entries. Note that for generic choices of the
-            orthostochastic matrix $A$, there will be exactly one $G\times G$-orbit of 
-            orthogonal matrices with Hadamard square equal to $A$.
+            with diagonal entries equal to &plusmn;1. Then $G \times G$ acts (by
+            $(g_1, g_2) O = g_1Og_2$) on the set of orthogonal matrices whose
+            Hadamard square is $A$. This method computes all such orthogonal matrices,
+            modulo the action of $G\times G$. The representative for each orbit is chosen 
+            so that the first row and column will have all nonnegative entries. Note that for
+            generic choices of the orthostochastic matrix $A$, there will be exactly one 
+            $G\times G$-orbit of orthogonal matrices with Hadamard square equal to $A$.
             
             The option {\tt Tolerance} can be used to specify the internal threshold for
             checking equality (any floating point number below the tolerance is treated as
@@ -549,7 +597,12 @@ doc ///
     Description
         Text
             This method computes the generalized mixed discriminant of an $n$-tuple 
-            of $n\times n$ matrices.
+            of $n\times n$ matrices. The generalized mixed discriminants give formulas
+            for the coefficients of a determinantal polynomial, which are polynomial in 
+            the entries of the representing matrices. Thus, computing determinantal
+            representations can be viewed as solving a system of specializations of 
+            generalized mixed discriminants, i.e. recovering a set of matrices from 
+            its generalized mixed discriminants.
                  
         Example
             n = 3
@@ -714,6 +767,83 @@ doc ///
 
 doc ///
     Key
+        randomPSD
+        (randomPSD, ZZ)
+        (randomPSD, ZZ, ZZ)
+        (randomPSD, ZZ, RR)
+        (randomPSD, ZZ, ZZ, RR)
+    Headline
+        constructs a random positive semidefinite matrix
+    Usage
+        randomPSD n
+        randomPSD(n, r)
+        randomPSD(n, s)
+        randomPSD(n, r, s)
+    Inputs
+        n:ZZ
+            the size of the output matrix
+        r:ZZ
+            the desired rank
+        s:RR
+            an upper bound on the spectral radius (= largest eigenvalue)
+    Outputs
+        :Matrix
+            a random $n\times n$ positive semidefinite matrix with real entries,
+            of rank $r$, with eigenvalues between $0$ and $s$.
+    Description
+        Text
+            This method returns a random symmetric positive semidefinite real matrix
+            of a given size $n$. The rank $r$ can also be specified: by default, then
+            the matrix will be full rank (with probability 1). An upper bound $s$ on the 
+            spectral radius can also be specified: by default, the matrix will have spectral
+            radius $1$.
+                 
+        Example
+            randomPSD 5
+            A1 = randomPSD(5, 3)
+            A2 = randomPSD(5, 3.0)
+            (A1, A2)/eigenvectors -- note the difference!
+            A3 = randomPSD(5, 3, 7.0)
+            eigenvectors(A3, Hermitian => true)
+    Caveat
+        This method works by choosing the eigenvectors and eigenvalues independently
+        randomly. The distribution on the (compact) set of PSD matrices of bounded
+        spectral radius may not be uniform or statistically desirable (cf. Wishart distribution).
+    SeeAlso
+        cholesky
+///
+
+doc ///
+    Key
+        cholesky
+        (cholesky, Matrix)
+        [cholesky, Tolerance]
+    Headline
+        computes the Cholesky decomposition of a positive semidefinite matrix
+    Usage
+        cholesky A
+    Inputs
+        A:
+            an $n\times n$ PSD matrix
+    Outputs
+        L:Matrix
+            a lower-triangular matrix, with A = LL^T
+    Description
+        Text
+            This method computes the Cholesky decomposition of a symmetric positive
+            semidefinite matrix $A$. The Cholesky decomposition is a factorization
+            $A = LL^T$, where $L$ is lower-triangular. This method computes such a
+            matrix $L$ (note: if $A$ is not positive-definite, then the Cholesky 
+            decomposition is not unique).
+                 
+        Example
+            A = randomPSD 5
+            L = cholesky A
+            clean(1e-12, A - L*transpose L) == 0
+///
+
+doc ///
+    Key
         hadamard
         (hadamard, Matrix, Matrix)
     Headline
@@ -814,6 +944,23 @@ SCC = CC[x1,x2,x3]
 fCC = sub(f, SCC)
 coeffMatrices = quadraticDetRep fCC
 assert(0 == clean(1e-10, fCC - det(id_(SCC^2) + sum apply(#gens SCC, i -> coeffMatrices#i*SCC_i))))
+R = RR[x_1..x_4]
+f = det sum({id_(R^2)} | apply(gens R, v -> v*randomIntegerSymmetric(2, R)))
+elapsedTime quadraticDetRep f
+///
+
+TEST /// -- Quadratic determinantal representation of size > 2
+d = 7
+R = RR[x_1..x_d]
+A1 = randomPSD d; 
+f1 = ((vars R)*(-1)*A1*transpose vars R + vars R*random(RR^d,RR^1) + 1)_(0,0)
+M = quadraticDetRep f1
+assert(clean(1e-12, f1 - det M) == 0)
+O = randomOrthogonal(d, RR)
+A2 = O*diagonalMatrix(toList apply(d-3, i -> random(0.0, 1.0)) | {0,0,0})*transpose O
+f2 = ((vars R)*(-1)*A2*transpose vars R + vars R*random(RR^d,RR^1) + 1)_(0,0)
+M = quadraticDetRep f2
+assert(clean(1e-12, f2 - det M) == 0)
 ///
 
 TEST /// -- cubic case tests
@@ -825,50 +972,46 @@ SRR=RR[x1,x2]
 fRR=sub(f, SRR)
 detrep = cubicBivariateDetRep fRR
 assert(all(detrep, L -> clean(1e-10, fRR - det(id_(SRR^3) + SRR_0*L#0 + SRR_1*L#1)) == 0))
-orthostochasticMatrices = cubicBivariateOrthostochastic f
-O1 = orthogonalFromOrthostochastic last orthostochasticMatrices
+///
+
+TEST /// -- threshold tests
 M = matrix{{0.5322,0.3711,0.0967},{0.4356,0.2578,0.3066},{0.0322,0.3711,0.5967}}
 assert(orthogonalFromOrthostochastic M === {})
-assert(clean(1e-4, first(O1 - orthogonalFromOrthostochastic(M, Tolerance => 1e-4))) == 0)
+assert(#orthogonalFromOrthostochastic(M, Tolerance => 1e-4) > 0)
+f = det(id_(R^3)*(1 + R_0*2.92837 + R_1*4.173841))
+assert((try cubicBivariateDetRep f) === null)
+assert(#cubicBivariateDetRep(f, Tolerance => 1e-4) == 1)
 ///
 
 TEST /// -- degenerate cases
 R = RR[x,y]
-f = (x+y+1)^3
-f = (x+y+1)*(x + 2*y + 1)*(x + 3*y + 1)
-f = (x+y+1)*(2*x + y + 1)*(3*x + 2*y + 1)
+f = (2*x - 5*y + 1)^3
+cubicBivariateDetRep f
+f = (-7*x+y+1)*(-7*x + 2*y + 1)*(-7*x + 3*y + 1)
+f = (-7*x+y+1)*(2*x + 2*y + 1)*(3*x + 2*y + 1)
+f = (2*x+y+1)*(2*x + 2*y + 1)*(2*x + 2*y + 1)
 ///
 
 TEST /// -- Quartic case tests
-R=QQ[x1,x2]
-eps = 1e-10
+R=RR[x1,x2]
 n = 4
 A = randomIntegerSymmetric(n, R)
 f = det(id_(R^n) + R_0*diagonalMatrix {4,3,2,1_R} + R_1*A)
 (D1, D2, diag1, diag2) = bivariateDiagEntries f
-sols = apply(bivariateSystem f, p -> p#Coordinates/realPart)
-integerSols = select(sols, p -> all(p, c -> clean(eps, c - round(6, c)) ==  0))
-sol1 = first select(integerSols, p -> all(n-1, i -> p#i >= 0)) /round_6
-upperIndices = select((0,0)..(n-1,n-1), s -> s#0 < s#1);
-H = hashTable apply(#sol1, i -> upperIndices#i => sol1#i);
-B = roundMatrix(6, matrix table(n, n, (i,j) -> if i == j then diag2_(i,0) else H#(min(i,j), max(i,j))))
-assert(A - B == 0) -- note: assert(A == B) fails!
-assert(f == det(id_(R^n) + R_0*sub(roundMatrix(6, diagonalMatrix D1), R) + R_1*sub(B, R)))
+elapsedTime sols = bivariateDetRep f;
+assert(all(sols, r -> clean(1e-7, f - det(id_(R^4) + R_0*r_0 + R_1*r_1)) == 0))
 ///
 
-TEST /// -- Generalized mixed discriminant - bivariate case
+TEST /// -- Generalized mixed discriminant
 n = 4
-R = QQ[a_(1,1)..a_(n,n),b_(1,1)..b_(n,n)][x_1,x_2]
+R = QQ[a_(1,1)..a_(n,n),b_(1,1)..b_(n,n)][x_1,x_2]  -- bivariate quartic
 A = sub(transpose genericMatrix(coefficientRing R,n,n), R)
 B = sub(transpose genericMatrix(coefficientRing R,b_(1,1),n,n), R)
 P = det(id_(R^n) + x_1*A + x_2*B);
 assert((last coefficients(P, Monomials => {x_1*x_2}))_(0,0) == generalizedMixedDiscriminant({A,B}))
 assert((last coefficients(P, Monomials => {x_1^3*x_2}))_(0,0) == generalizedMixedDiscriminant({A,A,A,B}))
-///
-
-TEST /// -- Generalized mixed discriminant - trivariate case
 n = 3
-R = QQ[a_(1,1)..a_(n,n),b_(1,1)..b_(n,n),c_(1,1)..c_(n,n)][x_1..x_n]
+R = QQ[a_(1,1)..a_(n,n),b_(1,1)..b_(n,n),c_(1,1)..c_(n,n)][x_1..x_n] -- trivariate cubic
 A = sub(transpose genericMatrix(coefficientRing R,n,n), R)
 B = sub(transpose genericMatrix(coefficientRing R,b_(1,1),n,n), R)
 C = sub(transpose genericMatrix(coefficientRing R,c_(1,1),n,n), R)
@@ -890,8 +1033,18 @@ O = first orthogonalFromOrthostochastic A
 assert(isOrthogonal O and isDoublyStochastic A and clean(1e-10, hadamard(O, O) - A) == 0)
 ///
 
+TEST /// -- cholesky, randomPSD test
+eps = 1e-15
+A = randomPSD 5
+E = eigenvectors(A, Hermitian => true)
+assert(clean(eps, A - E#1*diagonalMatrix(E#0)*transpose E#1) == 0)
+L = cholesky A
+assert(clean(eps, A - L*transpose L) == 0)
+///
+
 end--
 restart
+debug needsPackage "DeterminantalRepresentations"
 loadPackage("DeterminantalRepresentations", Reload => true)
 uninstallPackage "DeterminantalRepresentations"
 installPackage "DeterminantalRepresentations"
@@ -902,8 +1055,11 @@ check "DeterminantalRepresentations"
 
 -- Degenerate cubic (fix!)
 R = RR[x1,x2]
-f = 162*x1^3 - 23*x1^2*x2 + 99*x1^2 - 8*x1*x2^2 - 10*x1*x2 + 18*x1 + x2^3 - x2^2 - x2 + 1
-cubicBivariateOrthostochastic f
+f = 162*x1^3 - 23*x1^2*x2 + 99*x1^2 - 8*x1*x2^2 - 10*x1*x2 + 18*x1 + x2^3 - x2^2 - x2 + 1 -- D1 distinct eigenvalues, D2 repeated eigenvalues of multiplicity 2
+cubicBivariateDetRep f
+f = det(id_(R^3) + R_0*diagonalMatrix {1_R,2,3} + R_1*4*id_(R^3)) -- D1 distinct eigenvalues, D2 repeated eigenvalue of multiplicity 3
+f = det(id_(R^3) + R_0*2*id_(R^3) + R_1*4*id_(R^3)) -- D1, D2 both with repeated eigenvalue of multiplicity 3
+f = det(id_(R^3) + R_0*diagonalMatrix{2_R,2,3} + R_1*diagonalMatrix{5_R,5,-7}) -- D1, D2 both with repeated eigenvalue of multiplicity 2
 
 -- Quartic examples
 R = RR[x1,x2]
@@ -921,6 +1077,16 @@ f = det(id_(R^n) + x*sub(diagonalMatrix toList(1..n),R) + y*randomIntegerSymmetr
 
 ----------------------------------------------------
 -- Old code
+
+makeUvector = method()
+makeUvector (List, ZZ) := List => (D, k) -> transpose matrix{apply(subsets(#D, k), s -> product(s, i -> D_i))}
+
+makeUComp = method()
+makeUComp (List, ZZ, ZZ) := List => (D, k, l) -> (
+    Nk := subsets(#D, k);
+    Nl := subsets(#D, l);
+    transpose matrix{apply(Nl, s -> sum flatten((select(Nk, t -> #((set t)*(set s)) == 0))/(S -> product(D_S))))}
+)
 
 doc ///
     Key
@@ -965,6 +1131,8 @@ doc ///
 
 ----------------------------------------------------
 
+-- Nuij path (cf. Leykin-Plaumann)
+
 clearAll
 
 tOperator = method()
@@ -1001,8 +1169,9 @@ sol2 = point {{ -1}}
 S1= { sol1, sol2  }
 S0 = bertiniUserHomotopy (t,{a=>t}, H, S1)
 
-
 ------------------------------------------------------------------
+
+-- 27 lines on cubic surface from determinantal representation
 
 needsPackage "NumericalImplicitization"
 P2 = CC[x_0..x_2]
@@ -1012,15 +1181,31 @@ X = sub(matrix pack(1, gens P2), S)
 Z = sub(vars P3, S)
 M = sub(random(P3^3,P3^{3:-1}), S)
 L = matrix apply(flatten entries(M*X), e -> {transpose(e // Z)})
+clean(1e-10, M*X - L*transpose Z)
 I = sub(minors(3, L), P2)
 time pts = apply((numericalIrreducibleDecomposition I)#1, p -> p#Points#0#Coordinates)
+
+-- Get exceptional divisor
+L1 = ideal ((M*transpose matrix{pts#0})^{0,1})
+clean(1e-13, det M % L1)
+
 -- Get line through 2 points
 pair = pts_{0,1}
 newpair = {pair#0 + pair#1, pair#0 - pair#1}
+newpair = {4*pair#0 + 7*pair#1, 9*pair#0 - (-3/4)*pair#1}
 q = matrix apply(newpair, p -> {sub(gens I, matrix{p})})
 l = sub(Z*gens ker q, P3)
--- clean(1e-10, sub(l, q^{1}))
+clean(1e-10, sub(l, q^{0}))
+clean(1e-10, sub(l, q^{1}))
 
+sub(det M, P3) % l
+
+F = extractImageEquations(gens I, ideal 0_P2, 3)
+(map(P3, ring F, gens P3))(F)
+
+G = sub(matrix{{det L_{1,2,3}, det L_{0,2,3}, det L_{0,1,3}, det L_{0,1,2}}}, P2)
+q1 = matrix apply(newpair, p -> {sub(G, matrix{p})})
+l1 = sub(Z*gens ker q1, P3)
 
 q0 = sub(gens I, apply(#gens ring I, i -> (ring I)_i => newpair#0#i))
 q1 = sub(gens I, apply(#gens ring I, i -> (ring I)_i => newpair#1#i))
