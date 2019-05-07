@@ -1,7 +1,7 @@
 newPackage("DeterminantalRepresentations",
 	AuxiliaryFiles => false,
 	Version => "0.0.8",
-	Date => "May 5, 2019",
+	Date => "May 6, 2019",
 	Authors => {
 		{Name => "Justin Chen",
 		Email => "jchen646@gatech.edu"},
@@ -37,7 +37,8 @@ export {
     "randomOrthogonal",
     "randomPSD",
     "randomUnipotent",
-    "cholesky"
+    "cholesky",
+    "companionMatrix"
 }
 
 -- Quadratic case
@@ -82,11 +83,11 @@ trivariateDetRep RingElement := List => opts -> f -> (
     (k, d, x) := (coefficientRing ring f, first degree f, V#0);
     coordChange := if opts.DoCoordChange then sub(liftRealMatrix random(k^3,k^3), k) else id_(k^3);
     F := sub(f, matrix{V}*coordChange);
-    c := sub((last coefficients(F, Monomials => {x^3}))_(0,0), k);
+    c := sub((last coefficients(F, Monomials => {x^d}))_(0,0), k);
     c0 := if k === QQ and (odd d or c > 0) then lift(c^(1/d), QQ) else c^(1/d);
     F = 1/c*sub(sub(F, x => 1), k(monoid[delete(x,V)]));
     reps := if d == 3 then cubicBivariateDetRep(F, Tolerance => opts.Tolerance) else bivariateDetRep(F, Tolerance => opts.Tolerance);
-    apply(reps, r -> sub(c0*homogenize(sub(r, ring f), x), matrix{V}*inverse coordChange))
+    apply(reps, r -> sub(c0*homogenize(sub(r, ring f), x), matrix{V}*(id_(k^3) // coordChange)))
 )
 
 -- Bivariate code
@@ -108,19 +109,9 @@ cubicBivariateDetRep RingElement := List => opts -> f -> (
     q11 := (diag2#0-D2#2-q12*(D2#1-D2#2))/(D2#0-D2#2);
     q22 := S_0;
     if not clean(eps, q11 - (diag1#0-D1#2-q21*(D1#1-D1#2))/(D1#0-D1#2)) == 0 then print "Not compatible";
-    -- ) else (
-        -- if clean(eps, D1#1-D1#2) == 0 then (
-            -- (D1, D2, diag1, diag2) = (D2, D1, diag2, diag1);
-            -- varSet = reverse varSet;
-        -- );
-        -- q11 = (diag2#0-D2#2-S_0*(D2#1-D2#2))/(D2#0-D2#2);
-        -- q22 = (diag1#1-D1#2-S_0*(D1#0-D1#2))/(D1#1-D1#2);
-        -- q21 = (diag1#0-D1#2)/(D1#1-D1#2)-((D1#0-D1#2)*(diag2#0-D2#2-S_0*(D2#1-D2#2)))/((D1#1-D1#2)*(D2#0-D2#2));
-        -- q12 = S_0;
-    -- );
     Q := clean(eps, matrix{{q11,q12,1-q12-q11},{q21,q22,1-q21-q22},{1-q11-q21,1-q12-q22,1-(1-q11-q12)-(1-q21-q22)}}); print Q;
     oEq := ((q11-1)*(q22-1) + (q21-1)*(q12-1) - 1)^2 - 4*q11*q22*q12*q21;
-    L0 := apply(if clean(eps, oEq) == 0 then {0} else roots oEq, r -> liftRealMatrix sub(Q, S_0=>r));
+    L0 := apply(if clean(eps, oEq) == 0 then {0} else eigenvalues companionMatrix oEq, r -> liftRealMatrix sub(Q, S_0=>r));
     L := flatten apply(select(clean(eps, L0), isDoublyStochastic), M -> orthogonalFromOrthostochastic(M, opts));
     if k === QQ then (
         numDigits := ceiling(-log_10(eps));
@@ -170,7 +161,7 @@ bivariateDetRep RingElement := List => opts -> f -> (
         C1 := last coefficients(G, Monomials => sub(mons, S)) - sub(C, S);
         P := polySystem sub(clean(eps, C1), T);
         print ("Solving " | binomial(d,2) | " x " | binomial(d,2) | " polynomial system ...");
-        elapsedTime sols := select(solveSystem(P, Software => opts.Software), p -> not status p === RefinementFailure);
+        sols := select(solveSystem(P, Software => opts.Software), p -> not status p === RefinementFailure);
         realSols := realPoints apply(sols, p -> point{p#Coordinates/clean_eps});
         indices := sort subsets(d, 2);
         H := hashTable apply(binomial(d,2), i -> indices#i => i);
@@ -184,7 +175,7 @@ bivariateDetRep RingElement := List => opts -> f -> (
         colsum := minors(1, (transpose A)*allOnes - allOnes);
         J := minors(1, A*transpose A - id_(T^d)) + sub(L + rowsum + colsum, apply(gens T, v -> v => v^2));
         print "Computing orthogonal matrices numerically ...";
-        elapsedTime N := numericalIrreducibleDecomposition(J, Software => opts.Software);
+        N := numericalIrreducibleDecomposition(J, Software => opts.Software);
         realSols = realPoints apply(N#0, W -> point{W#Points#0#Coordinates/clean_eps});
         apply(realSols/(p -> sub(matrix pack(d, p#Coordinates/realPart), R)), M -> transpose M*A2*M)
     );
@@ -201,7 +192,7 @@ bivariateDiagEntries RingElement := Sequence => opts -> f -> ( -- returns diagon
     if #V > 2 then error "Not a bivariate polynomial";
     (R1, R2) := (k(monoid[V#0]), k(monoid[V#1]));
     (f1, f2) := (sub(sub(f, V#1 => 0), R1), sub(sub(f, V#0 => 0), R2));
-    (r1, r2) := (f1, f2)/roots;
+    (r1, r2) := (f1, f2)/companionMatrix/eigenvalues;
     D1 := reverse sort(apply(r1,r -> -1/r) | toList(d-#r1:0));
     D2 := reverse sort(apply(r2,r -> -1/r) | toList(d-#r2:0));
     apply(D1 | D2, r -> (
@@ -215,16 +206,17 @@ bivariateDiagEntries RingElement := Sequence => opts -> f -> ( -- returns diagon
     if #uniqueUpToTol(D1, opts) == 1 or #uniqueUpToTol(D2, opts) == 1 then return (D1, D2, {}, {})/(L -> transpose matrix{L});
     C1 := liftRealMatrix sub(last coefficients(f, Monomials=>apply(d, i -> V#0*V#1^i)),k);
     G1 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D2_s))), RR);
-    diag1 := addScaleToMajorize(flatten entries solve(G1, sub(C1, RR), ClosestFit => true), D1, gens ker G1, opts);
+    diag1 := addScaleToMajorize(flatten entries solve(G1, sub(C1, RR), ClosestFit => true), D1, G1, opts);
     C2 := liftRealMatrix sub(last coefficients(f, Monomials=>apply(d, i -> V#0^i*V#1)),k);
     G2 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D1_s))), RR);
-    diag2 := addScaleToMajorize(flatten entries solve(G2, sub(C2, RR), ClosestFit => true), D2, gens ker G2, opts);
+    diag2 := addScaleToMajorize(flatten entries solve(G2, sub(C2, RR), ClosestFit => true), D2, G2, opts);
     (D1, D2, diag1, diag2)/(L -> transpose matrix{L})
 )
 
 addScaleToMajorize = method(Options => options quadraticDetRep)
-addScaleToMajorize (List, List, Matrix) := List => opts -> (v, w, K) -> (
+addScaleToMajorize (List, List, Matrix) := List => opts -> (v, w, A) -> (
     if isMajorized(v, w, opts) then return v;
+    K := gens ker A;
     if clean(opts.Tolerance, K) == 0 then error (toString(w) | " cannot be majorized by " | toString(v));
     (w, K) = (rsort w, flatten entries K);
     ineqs := apply(select(subsets(#K), s -> clean(opts.Tolerance, sum K_s) != 0), s -> (K_s, w_(toList(0..<#s)) - v_s)/sum);
@@ -313,6 +305,8 @@ uniqueUpToTol List := List => opts -> L -> delete(null, apply(#L, i -> if not an
 
 clean (RR,BasicList) := BasicList => (eps, L) -> L/clean_eps
 
+isHomogeneous RR := x -> true
+
 round (ZZ,CC) := (n,x) -> round(n, realPart x) + ii*round(n,imaginaryPart x)
 round (ZZ,ZZ) := (n,x) -> x
 
@@ -381,7 +375,7 @@ randomOrthogonal (ZZ, Thing) := Matrix => (n, R) -> (
     k := if instance(R, InexactFieldFamily) then R else ultimate(coefficientRing, R);
     A := random(k^n, k^n);
     S := A - transpose A;
-    sub((-1)*inverse(S - id_(k^n))*(S + id_(k^n)), R)
+    sub((-1)*(id_(k^n) // (S - id_(k^n)))*(S + id_(k^n)), R)
 )
 randomOrthogonal ZZ := Matrix => n -> randomOrthogonal(n, RR)
 
@@ -416,6 +410,13 @@ cholesky Matrix := Matrix => opts -> A -> (
     	)
     );
     clean(opts.Tolerance, matrix table(n, n, (i,j) -> if i >= j then L#(i,j) else 0))
+)
+
+companionMatrix = method()
+companionMatrix RingElement := Matrix => f -> (
+     (n, k, x) := ((degree f)#0, ultimate(coefficientRing, ring f), (support f)#0);
+     C := sub(last coefficients(f, Monomials => apply(n+1, i -> x^i)), k);
+     (map(k^1,k^(n-1),0) || id_(k^(n-1))) | submatrix'((-1/C_(n,0))*C,{n},)
 )
 
 -- Documentation --
@@ -600,8 +601,8 @@ doc ///
             f=(1/2)*(x1^4+x2^4-3*x1^2-3*x2^2+x1^2*x2^2)+1
             repList = bivariateDetRep f;
             #repList
-            L = repList#0
-            clean(1e-10, f - det(id_(R^4) + R_0*L#0 + R_1*L#1))
+            repList#0
+            all(repList, A -> clean(1e-10, f - det A) == 0)
     Caveat
         As this algorithm implements relatively brute-force algorithms, it may not 
         terminate for polynomials of large degree (e.g. degree >= 5).
@@ -1180,9 +1181,9 @@ SCC = CC[x1,x2,x3]
 fCC = sub(f, SCC)
 M = quadraticDetRep fCC
 assert(0 == clean(1e-10, fCC - det M))
-R = RR[x_1..x_4]
+R = RR[x1,x2,x3,x4]
 f = det sum({id_(R^2)} | apply(gens R, v -> v*randomIntegerSymmetric(2, R)))
-elapsedTime M = quadraticDetRep f
+M = quadraticDetRep f
 assert(clean(1e-10, f - det M) == 0)
 ///
 
@@ -1221,12 +1222,15 @@ assert(all(detrep, L -> clean(1e-8, fCC - det L) == 0))
 
 TEST /// -- Cubic case: homogeneous, 3 variables
 S = RR[x,y,z]
-F = det sum apply(gens S, v -> v*sub(randomPSD 3, S)) -- nondegenerate
-reps = trivariateDetRep(F, Tolerance => 1e-4)
-clean(1e-10, F - det reps#0)
+F = det sum(gens S, v -> v*sub(randomPSD 3, S)) -- nondegenerate
+reps = trivariateDetRep(F, Tolerance => 1e-3)
+assert(clean(1e-4, F - det reps#0) == 0)
 F = (random(1,S))^3 -- degenerate
-reps = trivariateDetRep(F, Tolerance => 1e-4)
-clean(1e-10, F - det reps#0)
+reps = trivariateDetRep(F, Tolerance => 1e-3)
+assert(clean(1e-5, F - det reps#0) == 0)
+F = 162*y^3 - 23*y^2*z + 99*y^2*x - 8*y*z^2 - 10*y*z*x + 18*y*x^2 + z^3 - z^2*x - z*x^2 + x^3 -- degenerate (Example 2.17 in [Dey1])		
+A = first trivariateDetRep F		
+assert(clean(1e-10, F - det A) == 0)
 ///
 
 TEST /// -- Specific threshold tests
@@ -1283,8 +1287,8 @@ degenCubicList = {
     det(R_0*id_(R^3) + R_1*D233 + R_2*D577) -- non-diagonal
 }
 assert(all(degenCubicList, f -> (
-    reps = trivariateDetRep f;
-    all(reps, A -> clean(1e-10, f - det A) == 0)
+    reps = trivariateDetRep(f, Tolerance => 1e-4);
+    all(reps, A -> clean(1e-3, f - det A) == 0)
 )))
 ///
 
@@ -1355,8 +1359,8 @@ assert(isOrthogonal I and isDoublyStochastic I)
 assert(clean(1e-10, hadamard(I, I) - I) == 0)
 O1 = randomOrthogonal 5
 A = hadamard(O1, O1)
-O = first orthogonalFromOrthostochastic A
-assert(isOrthogonal O and isDoublyStochastic A and clean(1e-10, hadamard(O, O) - A) == 0)
+O = first orthogonalFromOrthostochastic(A, Tolerance => 1e-10)
+assert(isOrthogonal(O, Tolerance=>1e-5) and isDoublyStochastic A and clean(1e-8, hadamard(O, O) - A) == 0)
 ///
 
 TEST /// -- cholesky, randomPSD
