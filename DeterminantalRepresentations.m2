@@ -143,11 +143,16 @@ bivariateDetRep RingElement := List => opts -> f -> (
     eps := opts.Tolerance;
     R := ring f;
     d := first degree f;
+    k := ultimate(coefficientRing, R);
     if isHomogeneous f then ( -- to do: finish
-        
+        (x, y) := toSequence support f;
+        g := sub(f, x => 1);
+        Z := toList(d-(first degree g):0) | apply(eigenvalues companionMatrix g, r -> -1/r);
+        if not all(Z, z -> clean(eps, z - realPart z) == 0) then error "Not a real zero polynomial";
+        return (x*id_(R^d) + y*sub(liftRealMatrix diagonalMatrix Z, R));
     );
     (D1, D2, diag1, diag2) := bivariateDiagEntries(f, Tolerance => eps);
-    y := getSymbol "y";
+    y = getSymbol "y";
     (A1, A2) := (D1, D2)/(M -> sub(diagonalMatrix M, R));
     matrixList := if opts.Strategy == "DirectSystem" then ( -- via solving polynomial system numerically
         S := R/(ideal gens R)^(d+1);
@@ -179,6 +184,7 @@ bivariateDetRep RingElement := List => opts -> f -> (
         realSols = realPoints apply(N#0, W -> point{W#Points#0#Coordinates/clean_eps});
         apply(realSols/(p -> sub(matrix pack(d, p#Coordinates/realPart), R)), M -> transpose M*A2*M)
     );
+    if k === QQ then matrixList = matrixList/roundMatrix_(ceiling(-log_10(eps)));
     apply(matrixList, M -> sum{id_(R^d), R_0*A1, R_1*M})
 )
 
@@ -568,12 +574,36 @@ doc ///
             of lists of matrices, each giving a determinantal representation of $f$
     Description
         Text
-            This method implements two strategies to compute a monic symmetric 
-            determinantal representation of a bivariate polynomial numerically. For a
+            This method implements various strategies to compute a monic symmetric 
+            determinantal representation of a bivariate polynomial, if 
+            such a representation exists. 
+            
+            First, if the polynomial $f$ is homogeneous, then over 
+            @TO CC@, $f$ splits as a product of linear forms, and it 
+            admits a real symmetric determinantal representation iff
+            all the linear factors are defined over @TO RR@. If
+            this is the case, this method returns the diagonal matrix
+            of linear factors of $f$, which is a determinantal
+            representation:
+            
+        Example
+            R = RR[x,y]
+            bivariateDetRep(x^2 - 3*y^2)
+            bivariateDetRep(x^5+6*x^4*y-2*x^3*y^2-36*x^2*y^3+x*y^4+30*y^5)
+        
+        Text
+            Here it is assumed that the dehomogenization of $f$ (with
+            respect to the first variable in its @TO support@) is 
+            monic - this can always be achieved by rescaling.
+            
+            Now suppose $f$ is not homogeneous. For a
             symmetric determinantal representation $f = det(I + x_1A_1 + x_2A_2)$, by
             suitable conjugation one may assume $A_1 = D_1$ is a diagonal matrix. We
             also have that $D_1$ and the diagonal entries of $A_2$ can be found using 
-            the method @TO bivariateDiagEntries@.
+            the method @TO bivariateDiagEntries@. From this data,
+            here are 2 approaches to numerically compute a determinantal
+            representation of $f$,  which can be specified by the option 
+            {\tt Strategy}.
             
             The first (and default) strategy is "DirectSystem", which computes the 
             off-diagonal entries of $A_2$ directly as solutions to a 
@@ -605,7 +635,8 @@ doc ///
             all(repList, A -> clean(1e-10, f - det A) == 0)
     Caveat
         As this algorithm implements relatively brute-force algorithms, it may not 
-        terminate for polynomials of large degree (e.g. degree >= 5).
+        terminate for non-homogeneous polynomials of large degree 
+        (e.g. degree >= 5).
     SeeAlso
         bivariateDiagEntries
 ///
@@ -1078,8 +1109,44 @@ doc ///
             coeffs = coeffMatrices M
             M - sum(#gens R, i -> R_i*coeffs#i)
     Caveat
-        This method does not return the constant term, or coefficients of terms of 
-        degree $> 1$.
+        This method does not return the constant term, or coefficients 
+        of terms of degree $> 1$.
+///
+
+doc ///
+    Key
+        companionMatrix
+        (companionMatrix, RingElement)
+    Headline
+        companion matrix of a univariate polynomial
+    Usage
+        companionMatrix f
+    Inputs
+        f:RingElement
+            a univariate polynomial
+    Outputs
+        :Matrix
+    Description
+        Text
+            For a monic univariate polynomial $f$ of degree $d$, this
+            method returns the companion matrix $C(f)$, which is a 
+            $d\times d$ matrix whose characteristic polynomial is $f$. 
+            Explicitly, $C(f)$ has entries $1$ on the first subdiagonal
+            (the diagonal below the main diagonal), negative coefficients
+            of $f$ in the last column (other than the leading coefficient 
+            of $1$), and $0$ elsewhere.
+            
+            If $f$ is not monic, then this method returns the companion 
+            matrix of the normalized monic polynomial $(1/a_n)f$, where
+            $a_n$ is the leading coefficient of $f$.
+                 
+        Example
+            R = CC[x]
+            eigenvalues companionMatrix(9*x^2 - 1)
+            f = x^10 + sum(10, i -> random(i, R))
+            C = companionMatrix f
+            clean(1e-10, f - det(x*id_(R^10) - C))
+            all(eigenvalues C, z -> clean(1e-10, sub(f, R_0 => z)) == 0)
 ///
 
 doc ///
@@ -1292,9 +1359,16 @@ assert(all(degenCubicList, f -> (
 )))
 ///
 
-TEST /// -- Quartic case
-R=RR[x1,x2]
+TEST /// -- Higher degree case
+R=RR[x,y]
+f = x^5+6*x^4*y-2*x^3*y^2-36*x^2*y^3+x*y^4+30*y^5
+A = bivariateDetRep f
+assert(clean(1e-13, f - det A) == 0)
 n = 4
+R = RR[x1,x2]
+f = 24*x1^4+(49680/289)*x1^3*x2+50*x1^3+(123518/289)*x1^2*x2^2+(72507/289)*x1^2*x2+35*x1^2+(124740/289)*x1*x2^3+(112402/289)*x1*x2^2+(32022/289)*x1*x2+10*x1+144*x2^4+180*x2^3+80*x2^2+15*x2+1
+sols = bivariateDetRep f
+assert(all(sols, M -> clean(1e-10, f - det M) == 0))
 A = randomIntegerSymmetric(n, R)
 f = det(id_(R^n) + R_0*diagonalMatrix {4,3,2,1_R} + R_1*A)
 (D1, D2, diag1, diag2) = bivariateDiagEntries f
@@ -1372,6 +1446,18 @@ L = cholesky A
 assert(clean(eps, A - L*transpose L) == 0)
 ///
 
+TEST /// -- companion matrix / root test
+R = RR[x]
+f1 = sum(4, i -> random(i,R))
+f2 = sum(40, i -> random(i,R))
+f3 = (R_0)^2 - 1
+f4 = (R_0 - 1)^3
+f5 = (R_0 + 1)^6
+polys = {f1,f2,f3,f4,f5}
+rtList = polys/companionMatrix/eigenvalues;
+assert(all(#polys, i -> all(rtList#i, r -> clean(1e-5, sub(polys#i, R_0 => r)) == 0)))
+///
+
 end--
 restart
 debug needsPackage "DeterminantalRepresentations"
@@ -1399,10 +1485,7 @@ f = det(id_(R^n) + x*sub(diagonalMatrix toList(1..n),R) + y*randomIntegerSymmetr
 
 -- To do:
 
--- 1) Fix degenerate case
--- 2) Check cholesky when not diagonally dominant
--- 3) Cover bivariate homogeneous case 
--- 4) Cubic surface: check Clebsch example, fix cubicSurfaceDetRep
+-- Cubic surface: check Clebsch example, fix cubicSurfaceDetRep
 
 ----------------------------------------------------
 -- Old code
