@@ -74,22 +74,6 @@ quadraticDetRep RingElement := Matrix => opts -> f -> (
     )
 )
 
--- Trivariate case
-
-trivariateDetRep = method(Options => options quadraticDetRep ++ {DoCoordChange => false})
-trivariateDetRep RingElement := List => opts -> f -> (
-    V := support f;
-    if not #V == 3 or not isHomogeneous f then error "Expected a homogeneous polynomial in 3 variables";
-    (k, d, x) := (coefficientRing ring f, first degree f, V#0);
-    coordChange := if opts.DoCoordChange then sub(liftRealMatrix random(k^3,k^3), k) else id_(k^3);
-    F := sub(f, matrix{V}*coordChange);
-    c := sub((last coefficients(F, Monomials => {x^d}))_(0,0), k);
-    c0 := if k === QQ and (odd d or c > 0) then lift(c^(1/d), QQ) else c^(1/d);
-    F = 1/c*sub(sub(F, x => 1), k(monoid[delete(x,V)]));
-    reps := if d == 3 then cubicBivariateDetRep(F, Tolerance => opts.Tolerance) else bivariateDetRep(F, Tolerance => opts.Tolerance);
-    apply(reps, r -> sub(c0*homogenize(sub(r, ring f), x), matrix{V}*(id_(k^3) // coordChange)))
-)
-
 -- Bivariate code
 
 cubicBivariateDetRep = method(Options => options quadraticDetRep)
@@ -109,7 +93,7 @@ cubicBivariateDetRep RingElement := List => opts -> f -> (
     q11 := (diag2#0-D2#2-q12*(D2#1-D2#2))/(D2#0-D2#2);
     q22 := S_0;
     if not clean(eps, q11 - (diag1#0-D1#2-q21*(D1#1-D1#2))/(D1#0-D1#2)) == 0 then print "Not compatible";
-    Q := clean(eps, matrix{{q11,q12,1-q12-q11},{q21,q22,1-q21-q22},{1-q11-q21,1-q12-q22,1-(1-q11-q12)-(1-q21-q22)}}); print Q;
+    Q := clean(eps, matrix{{q11,q12,1-q12-q11},{q21,q22,1-q21-q22},{1-q11-q21,1-q12-q22,1-(1-q11-q12)-(1-q21-q22)}});
     oEq := ((q11-1)*(q22-1) + (q21-1)*(q12-1) - 1)^2 - 4*q11*q22*q12*q21;
     L0 := apply(if clean(eps, oEq) == 0 then {0} else eigenvalues companionMatrix oEq, r -> liftRealMatrix sub(Q, S_0=>r));
     L := flatten apply(select(clean(eps, L0), isDoublyStochastic), M -> orthogonalFromOrthostochastic(M, opts));
@@ -239,6 +223,22 @@ isMajorized (List, List) := Boolean => opts -> (v, w) -> ( -- true if v is major
     (v,w) = (v,w)/rsort;
     if not clean(opts.Tolerance, sum v - sum w) == 0 then return false;
     all(#v, k -> clean(opts.Tolerance, sum(w_{0..k}) - sum(v_{0..k})) >= 0)
+)
+
+-- Trivariate case
+
+trivariateDetRep = method(Options => options bivariateDetRep ++ {DoCoordChange => false})
+trivariateDetRep RingElement := List => opts -> f -> (
+    V := support f;
+    if not #V == 3 or not isHomogeneous f then error "Expected a homogeneous polynomial in 3 variables";
+    (k, d, x) := (coefficientRing ring f, first degree f, V#0);
+    coordChange := if opts.DoCoordChange then sub(liftRealMatrix random(k^3,k^3), k) else id_(k^3);
+    F := sub(f, matrix{V}*coordChange);
+    c := sub((last coefficients(F, Monomials => {x^d}))_(0,0), k);
+    c0 := if k === QQ and (odd d or c > 0) then lift(c^(1/d), QQ) else c^(1/d);
+    F = 1/c*sub(sub(F, x => 1), k(monoid[delete(x,V)]));
+    reps := if d == 3 then cubicBivariateDetRep(F, Tolerance => opts.Tolerance) else bivariateDetRep(F, Software => opts.Software, Strategy => opts.Strategy, Tolerance => opts.Tolerance);
+    apply(reps, r -> sub(c0*homogenize(sub(r, ring f), x), matrix{V}*(id_(k^3) // coordChange)))
 )
 
 -- Cubic surface
@@ -460,7 +460,7 @@ doc ///
             Currently, the functions in this package are geared towards computing monic
             symmetric determinantal representations of quadrics, as well as plane curves of
             low degree (i.e. cubics and quartics). The algorithms implemented in this 
-            package can be found in [Dey1], [Dey2].
+            package can be found in [1], [2].
             
             Additionally, a number of helper functions are included for creating/working
             with various classes of matrices, which may be of general interest (and
@@ -468,6 +468,15 @@ doc ///
             creating/testing orthogonal, symmetric, doubly stochastic, unipotent, and 
             positive semidefinite matrices, Hadamard products, Cholesky decomposition, 
             and lifting/rounding matrices from @TO CC@ to @TO RR@/@TO QQ@.
+            
+        Text
+            {\bf References}:
+        Code
+            UL {
+                "[1] Dey, P., Definite Determinantal Representations via Orthostochastic Matrices", 
+                "[2] Dey, P., Definite Determinantal Representations of Multivariate Polynomials"
+            }
+            
 ///
 
 doc ///
@@ -560,6 +569,8 @@ doc ///
         [bivariateDetRep, Tolerance]
         [bivariateDetRep, Software]
         [bivariateDetRep, Strategy]
+        [trivariateDetRep, Software]
+        [trivariateDetRep, Strategy]
     Headline
         computes determinantal representations of a bivariate polynomial numerically
     Usage
