@@ -1,22 +1,21 @@
 newPackage("DeterminantalRepresentations",
 	AuxiliaryFiles => false,
-	Version => "0.0.8",
-	Date => "May 6, 2019",
+	Version => "1.0.0",
+	Date => "May 18, 2019",
 	Authors => {
 		{Name => "Justin Chen",
 		Email => "jchen646@gatech.edu"},
 		{Name => "Papri Dey",
-		Email => "papri_dey@brown.edu"}
+		Email => "papridey@berkeley.edu"}
 	},
 	Headline => "a package for computing determinantal representations",
 	HomePage => "https://github.com/papridey/DeterminantalRepresentations",
 	PackageExports => {"NumericalAlgebraicGeometry"},
-	DebuggingMode => true,
+	DebuggingMode => false,
         Reload => true
 )
 export {
     "quadraticDetRep",
-    -- "cubicBivariateDetRep",
     "trivariateDetRep",
     "DoCoordChange",
     "bivariateDetRep",
@@ -28,7 +27,6 @@ export {
     "generalizedMixedDiscriminant",
     "roundMatrix",
     "liftRealMatrix",
-    -- "approxKer",
     "hadamard",
     "coeffMatrices",
     "isOrthogonal",
@@ -128,7 +126,7 @@ bivariateDetRep RingElement := List => opts -> f -> (
     R := ring f;
     d := first degree f;
     k := ultimate(coefficientRing, R);
-    if isHomogeneous f then ( -- to do: finish
+    if isHomogeneous f then (
         (x, y) := toSequence support f;
         g := sub(f, x => 1);
         Z := toList(d-(first degree g):0) | apply(eigenvalues companionMatrix g, r -> -1/r);
@@ -243,18 +241,26 @@ trivariateDetRep RingElement := List => opts -> f -> (
 
 -- Cubic surface
 
-linesOnCubicSurface = method()
-linesOnCubicSurface RingElement := List => f -> (
+linesOnCubicSurface = method(options quadraticDetRep)
+linesOnCubicSurface RingElement := List => opts -> f -> (
     if not(isHomogeneous f and (degree f)#0 == 3 and #gens ring f == 4) then error "Expected a homogeneous cubic in 4 variables";
     a := symbol a;
     R0 := CC(monoid[a_0..a_3]);
     R := R0(monoid[gens ring f]);
-    f = sub(sub(f, last support f => 1), R);
-    x := first support f;
-    F := sub(f, {(support f)#1 => R0_0*x + R0_1, (support f)#2 => R0_2*x + R0_3});
-    I := sub(ideal last coefficients F, R0);
-    sols := solveSystem polySystem I;
-    apply(sols/(p -> p#Coordinates), p -> matrix{{p#0, -1, 0, p#1}, {p#2, 0, -1, p#3}})
+    f = sub(f, R);
+    uniqueUpToTol flatten apply(subsets(gens R, 2), s -> (
+        (z, w) := toSequence(gens R - set s);
+        F := sub(f, {z => R0_0*s#0 + R0_1*s#1, w => R0_2*s#0 + R0_3*s#1});
+        I := sub(ideal last coefficients F, R0);
+        sols := solveSystem polySystem I;
+        apply(sols/(p -> p#Coordinates), p -> matrix{insert(index w, 0, insert(index z, -1, {p#0,p#1})), insert(index w, -1, insert(index z, 0, {p#2,p#3}))})
+    ))
+    -- f = sub(sub(f, last support f => 1), R);
+    -- x := first support f;
+    -- F := sub(f, {(support f)#1 => R0_0*x + R0_1, (support f)#2 => R0_2*x + R0_3});
+    -- I := sub(ideal last coefficients F, R0);
+    -- sols := solveSystem polySystem I;
+    -- apply(sols/(p -> p#Coordinates), p -> matrix{{p#0, -1, 0, p#1}, {p#2, 0, -1, p#3}})
 )
 
 doubleSix = method(Options => options quadraticDetRep)
@@ -684,7 +690,7 @@ doc ///
             using the method @TO bivariateDiagEntries@, to find a symmetric determinantal 
             representation of $f$ it suffices to compute the possible orthogonal matrices 
             $V$. This method computes the orthostochastic matrices which are the
-            Hadamard squares of $V$, via the algorithm in [Dey1], and returns the 
+            Hadamard squares of $V$, via the algorithm in [1], and returns the 
             associated determinantal representation (using the method 
             @TO orthogonalFromOrthostochastic@ - see that method for more on the
             possible orthogonal matrices returned).
