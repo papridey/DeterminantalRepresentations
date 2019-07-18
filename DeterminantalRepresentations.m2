@@ -241,58 +241,77 @@ trivariateDetRep RingElement := List => opts -> f -> (
 
 -- Cubic surface
 
-linesOnCubicSurface = method(options quadraticDetRep)
+linesOnCubicSurface = method(Options => options quadraticDetRep)
 linesOnCubicSurface RingElement := List => opts -> f -> (
     if not(isHomogeneous f and (degree f)#0 == 3 and #gens ring f == 4) then error "Expected a homogeneous cubic in 4 variables";
     a := symbol a;
     R0 := CC(monoid[a_0..a_3]);
     R := R0(monoid[gens ring f]);
     f = sub(f, R);
-    uniqueUpToTol flatten apply(subsets(gens R, 2), s -> (
+    allLines := uniqueUpToTol(flatten apply(subsets(gens R, 2), s -> (
         (z, w) := toSequence(gens R - set s);
         F := sub(f, {z => R0_0*s#0 + R0_1*s#1, w => R0_2*s#0 + R0_3*s#1});
         I := sub(ideal last coefficients F, R0);
         sols := solveSystem polySystem I;
-        apply(sols/(p -> p#Coordinates), p -> matrix{insert(index w, 0, insert(index z, -1, {p#0,p#1})), insert(index w, -1, insert(index z, 0, {p#2,p#3}))})
-    ))
-    -- f = sub(sub(f, last support f => 1), R);
-    -- x := first support f;
-    -- F := sub(f, {(support f)#1 => R0_0*x + R0_1, (support f)#2 => R0_2*x + R0_3});
-    -- I := sub(ideal last coefficients F, R0);
-    -- sols := solveSystem polySystem I;
-    -- apply(sols/(p -> p#Coordinates), p -> matrix{{p#0, -1, 0, p#1}, {p#2, 0, -1, p#3}})
+        apply(sols/(p -> clean(opts.Tolerance, p#Coordinates)), p -> matrix{insert(index w, 0, insert(index z, -1, {p#0,p#1})), insert(index w, -1, insert(index z, 0, {p#2,p#3}))})
+    )), opts);
+    uniqueLines := {};
+    for l in allLines do if all(uniqueLines, m -> numericalRank(m || l) > 2) then uniqueLines = append(uniqueLines, l);
+    uniqueLines
 )
 
-doubleSix = method(Options => options quadraticDetRep)
-doubleSix List := List => opts -> lineSet -> (
+-- doubleSix = method(Options => options quadraticDetRep)
+-- doubleSix List := List => opts -> lineSet -> (
+--     eps := opts.Tolerance;
+--     L := lineSet#0;
+--     meetL := select(delete(L, lineSet), l -> clean(eps, det(L || l)) == 0);
+--     skewL := delete(L, lineSet) - set meetL;
+--     (excepDivs, candSet, j) := ({0}, {}, 0);
+--     for i to 3 do (
+--         candSet = toList(1..#skewL-1) - set excepDivs;
+--         j = position(candSet, k -> all(excepDivs, e -> not clean(eps, det(skewL#e || skewL#k)) == 0));
+-- 	if j === null then ( print "Found no exceptional divisor"; break; );
+--         excepDivs = append(excepDivs, candSet#j);
+--     );
+--     excepDivs = toList apply(5, i -> skewL#(excepDivs#i));
+--     conic0 := (select(skewL_{5..15}, l -> all(excepDivs, e -> clean(eps, det(l || e)) == 0)))#0;
+--     conics := {};
+--     for i to 4 do (
+--         candSet = toList(0..#meetL-1) - set conics;
+--         j = position(candSet, k -> #select(excepDivs, e -> clean(eps, det(e || meetL#k)) == 0) == 4);
+-- 	if j === null then ( print "Found no conic"; break; );
+--         conics = append(conics, candSet#j);
+--     );
+--     ds := {{L} | excepDivs, {conic0} | toList apply(5, i -> meetL#(conics#i))};
+--     {ds#0, (ds#1)_(inversePermutation apply(6, i -> position(ds#0, l -> not clean(eps, det(l || ds#1#i)) == 0)))}
+-- )
+-- doubleSix RingElement := List => opts -> f -> doubleSix(linesOnCubicSurface f, opts)
+
+doubleSixes = method(Options => options quadraticDetRep)
+doubleSixes List := List => opts -> lineSet -> (
     eps := opts.Tolerance;
-    L := lineSet#0;
-    meetL := select(delete(L, lineSet), l -> clean(eps, det(L || l)) == 0);
-    skewL := delete(L, lineSet) - set meetL;
-    (excepDivs, candSet, j) := ({0}, {}, 0);
-    for i to 3 do (
-        candSet = toList(1..#skewL-1) - set excepDivs;
-        j = position(candSet, k -> all(excepDivs, e -> not clean(eps, det(skewL#e || skewL#k)) == 0));
-        excepDivs = append(excepDivs, candSet#j);
+    H := hashTable apply(lineSet, l -> l => select(delete(l,lineSet), m -> clean(eps, det(l || m)) != 0));
+    skewPairs := select(subsets(lineSet,2), s -> clean(eps, det(s#0 || s#1)) != 0);
+    skewPairHash := hashTable apply(skewPairs, s -> s => set(H#(s#0)) * set(H#(s#1)));
+    ds := {};
+    for s in skewPairs do (
+	if #unique(ds/set) >= 72 then break;
+	for t in subsets(toList skewPairHash#s,4) do if all(subsets(t,2), u -> clean(eps, det(u#0 || u#1)) != 0) then ds = append(ds, s | t);
     );
-    excepDivs = toList apply(5, i -> skewL#(excepDivs#i));
-    conic0 := (select(skewL_{5..15}, l -> all(excepDivs, e -> clean(eps, det(l || e)) == 0)))#0;
-    conics := {};
-    for i to 4 do (
-        candSet = toList(0..#meetL-1) - set conics;
-        j = position(candSet, k -> #select(excepDivs, e -> clean(eps, det(e || meetL#k)) == 0) == 4);
-        conics = append(conics, candSet#j);
-    );
-    ds := {{L} | excepDivs, {conic0} | toList apply(5, i -> meetL#(conics#i))};
-    {ds#0, (ds#1)_(inversePermutation apply(6, i -> position(ds#0, l -> not clean(eps, det(l || ds#1#i)) == 0)))}
+    ds = (unique(ds/set))/toList;
+    for i to 35 list (
+	l0 := first ds;
+	l1 := first select(drop(ds, 1), s -> all(s, l -> #select(l0, m -> clean(eps, det(m || l)) == 0) == 5));
+	ds = ds - set{l0,l1};
+	{l0, apply(#l1, i -> first select(l1, l -> clean(eps, det(l || l0#i)) != 0))}
+    )
 )
-doubleSix RingElement := List => opts -> f -> doubleSix(linesOnCubicSurface f, opts)
 
 cubicSurfaceDetRep = method(Options => options quadraticDetRep)
 cubicSurfaceDetRep (RingElement, List) := Matrix => opts -> (f, lineSet) -> (
-    ds := doubleSix(lineSet, opts);
+    ds := first doubleSixes(lineSet, opts);
     tritangents := apply({{0,1},{1,2},{2,0},{0,2},{1,0},{2,1}}, s -> approxKer(ds#1#(s#0) || ds#0#(s#1)));
-    tritangents = apply(tritangents, p -> (vars ring f*p)_(0,0));
+    tritangents = apply(tritangents, p -> if p == 0 then 0_(ring f) else (vars ring f*p)_(0,0));
     matrix{{0, tritangents#0, tritangents#3}, {tritangents#4, 0, tritangents#1}, {tritangents#2, tritangents#5, 0}}
 )
 cubicSurfaceDetRep RingElement := Matrix => opts -> f -> cubicSurfaceDetRep(f, linesOnCubicSurface f, opts)
@@ -1393,34 +1412,33 @@ sols = bivariateDetRep f;
 assert(all(sols, M -> clean(1e-6, f - det M) == 0))
 ///
 
--- TEST /// -- cubic surface (Bernd)
--- eps = 1e-10
--- R = CC[x,y,z,w]
--- f = homogenize(3*x^3+2*x^2*y+x*y^2+6*y^3+7*x^2*z+8*x*y*z+3*y^2*z+8*x*z^2+3*y*z^2+8*z^3+8*x^2+7*x*y+9*y^2+7*x*z+3*y*z+8*z^2+2*x+4*y+8*z+1, w)
--- lineSet = linesOnCubicSurface f
--- assert(#lineSet == 27)
--- ds = doubleSix lineSet -- only works ~ 45% of the time, depending on lineSet#0
--- assert(all(subsets(ds#1, 2), s -> not clean(eps, det(s#0 || s#1)) == 0))
--- assert(all(ds#1, l -> #select(ds#0, m -> clean(eps, det(l || m)) == 0) == 5))
--- assert(all(6, i -> not clean(eps, det(ds#0#i || ds#1#i)) == 0))
--- M = cubicSurfaceDetRep f
--- g1 = M_(0,1)*M_(1,2)*M_(2,0)
--- g2 = M_(0,2)*M_(1,0)*M_(2,1)
--- assert(clean(eps, det M - (g1 + g2)) == 0)
--- a1 = sub(last coefficients(g1, Monomials => {x^3, w^3}), coefficientRing ring f)
--- a2 = sub(last coefficients(g2, Monomials => {x^3, w^3}), coefficientRing ring f)
--- b = sub(last coefficients(f, Monomials => {x^3, w^3}), coefficientRing ring f)
--- c = solve(a1 | a2, b)
--- f - (c_(0,0)*g1 + c_(1,0)*g2)
--- ///
+TEST /// -- cubic surface (Bernd)
+eps = 1e-10
+R = CC[x,y,z,w]
+f = homogenize(3*x^3+2*x^2*y+x*y^2+6*y^3+7*x^2*z+8*x*y*z+3*y^2*z+8*x*z^2+3*y*z^2+8*z^3+8*x^2+7*x*y+9*y^2+7*x*z+3*y*z+8*z^2+2*x+4*y+8*z+1, w)
+lineSet = linesOnCubicSurface f
+assert(#lineSet == 27)
+ds = doubleSix lineSet -- only works ~ 45% of the time, depending on lineSet#0
+assert(all(subsets(ds#1, 2), s -> not clean(eps, det(s#0 || s#1)) == 0))
+assert(all(ds#1, l -> #select(ds#0, m -> clean(eps, det(l || m)) == 0) == 5))
+assert(all(6, i -> not clean(eps, det(ds#0#i || ds#1#i)) == 0))
+M = cubicSurfaceDetRep f
+g1 = M_(0,1)*M_(1,2)*M_(2,0)
+g2 = M_(0,2)*M_(1,0)*M_(2,1)
+assert(clean(eps, det M - (g1 + g2)) == 0)
+a1 = sub(last coefficients(g1, Monomials => {x^3, w^3}), coefficientRing ring f)
+a2 = sub(last coefficients(g2, Monomials => {x^3, w^3}), coefficientRing ring f)
+b = sub(last coefficients(f, Monomials => {x^3, w^3}), coefficientRing ring f)
+c = solve(a1 | a2, b)
+f - (c_(0,0)*g1 + c_(1,0)*g2)
+///
 
 TEST /// -- Clebsch cubic surface (cf. https://blogs.ams.org/visualinsight/2016/02/15/27-lines-on-a-cubic-surface/)
 eps = 1e-10
 R = CC[x,y,z,w]
 f = 81*(x^3 + y^3 + z^3) - 189*(x^2*y + x^2*z + x*y^2 + x*z^2 + y^2*z + y*z^2) + 54*x*y*z + 126*w*(x*y + x*z + y*z) - 9*w*(x^2 + y^2 + z^2) - 9*w^2*(x+y+z) + w^3
-lineSet = linesOnCubicSurface f
+elapsedTime lineSet = linesOnCubicSurface(f, Tolerance => eps)
 assert(all(lineSet, m -> clean(eps, m - liftRealMatrix m) == 0)) -- all real lines
--- assert(#lineSet == 27) -- fails! (5 lines at infinity?)
 ///
 
 TEST /// -- Generalized mixed discriminant
