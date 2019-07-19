@@ -1,7 +1,7 @@
 newPackage("DeterminantalRepresentations",
 	AuxiliaryFiles => false,
-	Version => "1.0.0",
-	Date => "May 18, 2019",
+	Version => "1.1.0",
+	Date => "July 19, 2019",
 	Authors => {
 		{Name => "Justin Chen",
 		Email => "jchen646@gatech.edu"},
@@ -22,7 +22,7 @@ export {
     "bivariateDiagEntries",
     "orthogonalFromOrthostochastic",
     "linesOnCubicSurface",
-    "doubleSix",
+    "doubleSixes",
     "cubicSurfaceDetRep",
     "generalizedMixedDiscriminant",
     "roundMatrix",
