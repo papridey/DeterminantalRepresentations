@@ -1,7 +1,7 @@
 newPackage("DeterminantalRepresentations",
 	AuxiliaryFiles => false,
-	Version => "1.1.0",
-	Date => "July 19, 2019",
+	Version => "1.2.0",
+	Date => "August 16, 2019",
 	Authors => {
 		{Name => "Justin Chen",
 		Email => "jchen646@gatech.edu"},
@@ -15,9 +15,10 @@ newPackage("DeterminantalRepresentations",
         Reload => true
 )
 export {
+    "detRep",
     "quadraticDetRep",
     "trivariateDetRep",
-    "DoCoordChange",
+    "HyperbolicPt",
     "bivariateDetRep",
     "bivariateDiagEntries",
     "orthogonalFromOrthostochastic",
@@ -38,6 +39,19 @@ export {
     "cholesky",
     "companionMatrix"
 }
+
+detRep = method(Options => {
+    Tolerance => 1e-6, 
+    HyperbolicPt => null,
+    Software => M2engine})
+detRep RingElement := List => opts -> f -> (
+    (n, d) := (#support f, first degree f);
+    if d == 2 then quadraticDetRep(f, Tolerance => opts.Tolerance)
+    else if n == 2 then bivariateDetRep(f, Tolerance => opts.Tolerance, Software => opts.Software)
+    else if n == 3 then trivariateDetRep(f, opts)
+    else if n == 4 and d == 3 then cubicSurfaceDetRep(f, Tolerance => opts.Tolerance)
+    else error "Currently only implemented for quadrics, plane curves, and cubic surfaces"
+)
 
 -- Quadratic case
 
@@ -61,14 +75,14 @@ quadraticDetRep RingElement := Matrix => opts -> f -> (
         L := apply(n, i -> matrix{{r_(i,0),t_(i,0) - ii*u_(i,0)},{t_(i,0)+ii*u_(i,0),s_(i,0)}});
         if not class k === ComplexField then L = L/liftRealMatrix/clean_(opts.Tolerance);
         if k === QQ then L = L/roundMatrix_(ceiling(log_10(1/opts.Tolerance)));
-        id_(R^2) + sum apply(n, i -> R_i*sub(L#i, R))
+        {id_(R^2) + sum apply(n, i -> R_i*sub(L#i, R))}
     ) else (
         E = clean(opts.Tolerance, eigenvectors(A, Hermitian => true));
         if any(E#0, e -> e > 0) then ( print "No determinantal representation"; return; );
         C := cholesky((-1)*A, opts);
         if not class k === ComplexField then C = clean(opts.Tolerance, liftRealMatrix C);
         if k === QQ then C = roundMatrix(ceiling(log_10(1/opts.Tolerance)), C);
-        (id_(R^n) | transpose C*transpose vars R) || ((vars R*C) | matrix{{1+(vars R)*b}})
+        {(id_(R^n) | transpose C*transpose vars R) || ((vars R*C) | matrix{{1+(vars R)*b}})}
     )
 )
 
@@ -131,7 +145,7 @@ bivariateDetRep RingElement := List => opts -> f -> (
         g := sub(f, x => 1);
         Z := toList(d-(first degree g):0) | apply(eigenvalues companionMatrix g, r -> -1/r);
         if not all(Z, z -> clean(eps, z - realPart z) == 0) then error "Not a real zero polynomial";
-        return (x*id_(R^d) + y*sub(liftRealMatrix diagonalMatrix Z, R));
+        return {(x*id_(R^d) + y*sub(liftRealMatrix diagonalMatrix Z, R))};
     );
     (D1, D2, diag1, diag2) := bivariateDiagEntries(f, Tolerance => eps);
     y = getSymbol "y";
@@ -147,7 +161,7 @@ bivariateDetRep RingElement := List => opts -> f -> (
         G := det(id_(S^d) + S_0*sub(diagonalMatrix D1, S) + S_1*sub(B, S));
         C1 := last coefficients(G, Monomials => sub(mons, S)) - sub(C, S);
         P := polySystem sub(clean(eps, C1), T);
-        print ("Solving " | binomial(d,2) | " x " | binomial(d,2) | " polynomial system ...");
+        if debugLevel > 0 then print ("Solving " | binomial(d,2) | " x " | binomial(d,2) | " polynomial system ...");
         sols := select(solveSystem(P, Software => opts.Software), p -> not status p === RefinementFailure);
         realSols := realPoints apply(sols, p -> point{p#Coordinates/clean_eps});
         indices := sort subsets(d, 2);
@@ -161,7 +175,7 @@ bivariateDetRep RingElement := List => opts -> f -> (
         rowsum := minors(1, A*allOnes - allOnes);
         colsum := minors(1, (transpose A)*allOnes - allOnes);
         J := minors(1, A*transpose A - id_(T^d)) + sub(L + rowsum + colsum, apply(gens T, v -> v => v^2));
-        print "Computing orthogonal matrices numerically ...";
+        if debugLevel > 0 then print "Computing orthogonal matrices numerically ...";
         N := numericalIrreducibleDecomposition(J, Software => opts.Software);
         realSols = realPoints apply(N#0, W -> point{W#Points#0#Coordinates/clean_eps});
         apply(realSols/(p -> sub(matrix pack(d, p#Coordinates/realPart), R)), M -> transpose M*A2*M)
@@ -225,18 +239,22 @@ isMajorized (List, List) := Boolean => opts -> (v, w) -> ( -- true if v is major
 
 -- Trivariate case
 
-trivariateDetRep = method(Options => options bivariateDetRep ++ {DoCoordChange => false})
+trivariateDetRep = method(Options => options detRep)
 trivariateDetRep RingElement := List => opts -> f -> (
     V := support f;
-    if not #V == 3 or not isHomogeneous f then error "Expected a homogeneous polynomial in 3 variables";
+    if #V > 3 or not isHomogeneous f then error "Expected a homogeneous polynomial in 3 variables";
     (k, d, x) := (coefficientRing ring f, first degree f, V#0);
-    coordChange := if opts.DoCoordChange then sub(liftRealMatrix random(k^3,k^3), k) else id_(k^3);
-    F := sub(f, matrix{V}*coordChange);
-    c := sub((last coefficients(F, Monomials => {x^d}))_(0,0), k);
+    (e, eps) := (opts.HyperbolicPt, opts.Tolerance);
+    A := if e =!= null then sub(liftRealMatrix(e | random(k^3,k^2)), k) else id_(k^3);
+    F := sub(f, matrix{V}*A);
+    c := last coefficients(F, Monomials => {x^d});
+    if c == 0 then error "Expected polynomial to be hyperbolic with respect to (1,0,0). Try specifying a point with the option HyperbolicPt";
+    c = sub(c_(0,0), k);
     c0 := if k === QQ and (odd d or c > 0) then lift(c^(1/d), QQ) else c^(1/d);
     F = 1/c*sub(sub(F, x => 1), k(monoid[delete(x,V)]));
-    reps := if d == 3 then cubicBivariateDetRep(F, Tolerance => opts.Tolerance) else bivariateDetRep(F, Software => opts.Software, Strategy => opts.Strategy, Tolerance => opts.Tolerance);
-    apply(reps, r -> sub(c0*homogenize(sub(r, ring f), x), matrix{V}*(id_(k^3) // coordChange)))
+    reps := if d == 3 then cubicBivariateDetRep(F, Tolerance => eps) else bivariateDetRep(F, Software => opts.Software, Tolerance => eps);
+    reps = apply(reps, r -> sub(c0*homogenize(sub(r, ring f), x), matrix{V}*(id_(k^3) // A)));
+    if k === QQ then reps else reps/clean_eps
 )
 
 -- Cubic surface
@@ -466,7 +484,7 @@ doc ///
             polynomials. To be precise, a polynomial $f$ in $\mathbb{R}[x_1, \ldots, x_n]$ 
             of total degree $d$ (not necessarily homogeneous) is called determinantal if $f$
             is the determinant of a matrix of linear forms - in other words, there exist
-            matrices $A_0, \ldots, A_n \in \mathbb{R}^{d\times d}$ such that 
+            matrices $A_0, \ldots, A_n\in \mathbb{R}^{d\times d}$ such that 
             $f(x_1, \ldots, x_n) = det(A_0 + x_1A_1 + \ldots + x_nA_n)$. The matrix pencil 
             $A_0 + x_1A_1 + \ldots + x_nA_n$ is said to give a determinantal representation
             of $f$ of size $d$. If the matrices $A_i$ can be chosen to be all symmetric, then
@@ -506,6 +524,37 @@ doc ///
 
 doc ///
     Key
+        detRep
+        (detRep, RingElement)
+        [detRep, Tolerance]
+    Headline
+        compute determinantal representations
+    Usage
+        detRep f
+        detRep(f, Tolerance => 1e-6)
+    Inputs
+        f:RingElement
+            a polynomial with real coefficients
+    Outputs
+        :List
+            of matrices, each giving a determinantal representation of $f$
+    Description
+        Text
+            This method is a wrapper function for the various methods implemented in this
+            package. Currently it accepts quadrics (in any number of variables), bivariate 
+            polynomials or homogeneous trivariate polynomials, and cubic polynomials in 
+            4 variables. By default, all polynomials are assumed to have real coefficients.
+            For any polynomial falling in one of these categories, the user may call this method,
+            and the correct algorithm will be automatically applied. For details on each case,
+            see the pages below.
+    SeeAlso
+        quadraticDetRep
+        bivariateDetRep
+        trivariateDetRep
+///
+
+doc ///
+    Key
         quadraticDetRep
         (quadraticDetRep, RingElement)
         [quadraticDetRep, Tolerance]
@@ -539,10 +588,10 @@ doc ///
         Example
             R = RR[x1, x2, x3, x4]
             f = 260*x1^2+180*x1*x2-25*x2^2-140*x1*x3-170*x2*x3-121*x3^2+248*x1*x4+94*x2*x4-142*x3*x4+35*x4^2+36*x1+18*x2+2*x3+20*x4+1
-            A = quadraticDetRep f
+            A = first quadraticDetRep f
             clean(1e-10, f - det A)
             g = -61*x1^2-96*x1*x2-177*x2^2-126*x1*x3-202*x2*x3-86*x3^2-94*x1*x4-190*x2*x4-140*x3*x4-67*x4^2+8*x1+3*x2+5*x3+3*x4+1
-            B = quadraticDetRep g
+            B = first quadraticDetRep g
             clean(1e-10, g - det B)
 ///
 
@@ -595,7 +644,7 @@ doc ///
         [bivariateDetRep, Software]
         [bivariateDetRep, Strategy]
         [trivariateDetRep, Software]
-        [trivariateDetRep, Strategy]
+        [detRep, Software]
     Headline
         computes determinantal representations of a bivariate polynomial numerically
     Usage
@@ -607,7 +656,7 @@ doc ///
             a bivariate polynomial with real coefficients
     Outputs
         :List
-            of lists of matrices, each giving a determinantal representation of $f$
+            of matrices, each giving a determinantal representation of $f$
     Description
         Text
             This method implements various strategies to compute a monic symmetric 
@@ -682,14 +731,15 @@ doc ///
         trivariateDetRep
         (trivariateDetRep, RingElement)
         [trivariateDetRep, Tolerance]
-        DoCoordChange
-        [trivariateDetRep, DoCoordChange]
+        HyperbolicPt
+        [trivariateDetRep, HyperbolicPt]
+        [detRep, HyperbolicPt]
     Headline
         computes determinantal representations of a hyperbolic polynomial in 3 variables
     Usage
         trivariateDetRep f
         trivariateDetRep(f, Tolerance => 1e-6)
-        trivariateDetRep(f, DoCoordChange => false)
+        trivariateDetRep(f, HyperbolicPt => matrix{{1_RR},{1},{1}})
     Inputs
         f:RingElement
             a hyperbolic polynomial defining a real projective plane curve
@@ -718,10 +768,12 @@ doc ///
             definite determinantal representations is $2^g$, where $g = (d-1)(d-2)/2$ is the
             genus of the plane curve.
             
-            For plane curves in special position, the option {\tt DoCoordChange} allows 
-            the user to apply a general coordinate change before computing the 
-            determinantal representation (which will then be inverted before giving the result
-             - note that the representation will no longer be monic in general).
+            For plane curves in special position, the option {\tt HyperbolicPt} allows 
+            the user to specify a point $e$ such that the polynomial is hyperbolic with
+            respect to $e$. In this case, a general coordinate change which brings $e$ to 
+            $(1,0,0)$ is applied before computing the determinantal representation (which will 
+            then be inverted before giving the result - note that the representation will no longer 
+            be monic in general).
             
             When working over an @TO InexactFieldFamily@ like @TO RR@ or 
             @TO CC@, the option {\tt Tolerance} can be used to specify the internal
@@ -733,8 +785,8 @@ doc ///
             f = 6*x1^3+36*x1^2*x2+66*x1*x2^2+36*x2^3+11*x1^2*x3+42*x1*x2*x3+36*x2^2*x3+6*x1*x3^2+11*x2*x3^2+x3^3
             repList = trivariateDetRep f
             all(repList, A -> clean(1e-10, f - det A) == 0)
-            g = product gens R
-            B = clean(1e-6, first trivariateDetRep(g, DoCoordChange => true))
+            g = product gens R -- hyperbolic with respect to (1,1,1)
+            B = clean(1e-6, first trivariateDetRep(g, HyperbolicPt => matrix{{1_RR},{1},{1}}))
             clean(1e-6, g - det B)
     SeeAlso
         bivariateDiagEntries
@@ -1273,19 +1325,19 @@ undocumented {
 TEST /// -- Quadratic case: over QQ, RR, CC
 S = QQ[x1,x2,x3]
 f = 1 - 8*x1*x2 - 4*x1*x3 - 100*x2^2 - 12*x2*x3 - x3^2 - 5*x1^2
-M = quadraticDetRep(f, Tolerance => 1e-10)
+M = first detRep(f, Tolerance => 1e-10)
 assert(clean(1e-9, sub(f - det M, RR(monoid[gens S]))) == 0)
 SRR = RR[x1,x2,x3]
 fRR = sub(f, SRR)
-M = quadraticDetRep fRR
+M = first detRep fRR
 assert(0 == clean(1e-10, fRR - det M))
 SCC = CC[x1,x2,x3]
 fCC = sub(f, SCC)
-M = quadraticDetRep fCC
+M = first detRep fCC
 assert(0 == clean(1e-10, fCC - det M))
 R = RR[x1,x2,x3,x4]
 f = det sum({id_(R^2)} | apply(gens R, v -> v*randomIntegerSymmetric(2, R)))
-M = quadraticDetRep f
+M = first detRep f
 assert(clean(1e-10, f - det M) == 0)
 ///
 
@@ -1294,11 +1346,11 @@ d = 7
 R = RR[x_1..x_d]
 A1 = randomPSD d; 
 f1 = ((vars R)*(-1)*A1*transpose vars R + vars R*random(RR^d,RR^1) + 1)_(0,0)
-M = quadraticDetRep f1
+M = first detRep f1
 assert(clean(1e-12, f1 - det M) == 0)
 A2 = randomPSD(d, d//2)
 f2 = ((vars R)*(-1)*A2*transpose vars R + vars R*random(RR^d,RR^1) + 1)_(0,0)
-M = quadraticDetRep f2
+M = first detRep f2
 assert(clean(1e-12, f2 - det M) == 0)
 coeffs = coeffMatrices M
 assert(clean(1e-10, M - sum({id_(R^(d+1))} | apply(#gens R, i -> R_i*coeffs#i))) == 0)
@@ -1307,32 +1359,31 @@ assert(clean(1e-10, M - sum({id_(R^(d+1))} | apply(#gens R, i -> R_i*coeffs#i)))
 TEST /// -- Cubic case: over QQ, RR, CC
 S=QQ[x1,x2,x3]
 f = 6*x1^3+36*x1^2*x2+66*x1*x2^2+36*x2^3+11*x1^2*x3+42*x1*x2*x3+36*x2^2*x3+6*x1*x3^2+11*x2*x3^2+x3^3
-detrep = trivariateDetRep(f, Tolerance => 1e-12)
-assert(all(detrep, A -> clean(1e-10, sub(f - det A, RR(monoid[gens S]))) == 0))
+reps = detRep(f, Tolerance => 1e-12)
+assert(all(reps, A -> clean(1e-10, sub(f - det A, RR(monoid[gens S]))) == 0))
 SRR=RR[x1,x2,x3]
 fRR=sub(f, SRR)
-detrep = trivariateDetRep fRR
-assert(all(detrep, L -> clean(1e-10, fRR - det L) == 0))
+reps = detRep fRR
+assert(all(reps, L -> clean(1e-10, fRR - det L) == 0))
 SCC=CC[x1,x2,x3]
 fCC=sub(f, SCC)
-detrep = trivariateDetRep fCC
-assert(all(detrep, L -> clean(1e-10, fCC - det L) == 0))
-detrep = trivariateDetRep(fCC, DoCoordChange => true) -- representations are not monic
-assert(all(detrep, L -> clean(1e-8, fCC - det L) == 0))
-
+reps = detRep fCC
+assert(all(reps, L -> clean(1e-10, fCC - det L) == 0))
+reps = detRep(fCC, HyperbolicPt => matrix{{3_RR},{2},{-7}}) -- representations are not monic
+assert(all(reps, L -> clean(1e-8, fCC - det L) == 0))
 ///
 
 TEST /// -- Cubic case: homogeneous, 3 variables
 S = RR[x,y,z]
 F = det sum(gens S, v -> v*sub(randomPSD 3, S)) -- nondegenerate
-reps = trivariateDetRep(F, Tolerance => 1e-3)
-assert(clean(1e-4, F - det reps#0) == 0)
+M = first detRep F
+assert(clean(1e-4, F - det M) == 0)
 F = (random(1,S))^3 -- degenerate
-reps = trivariateDetRep(F, Tolerance => 1e-3)
-assert(clean(1e-5, F - det reps#0) == 0)
+M = first detRep(F, Tolerance => 1e-3)
+assert(clean(1e-5, F - det M) == 0)
 F = 162*y^3 - 23*y^2*z + 99*y^2*x - 8*y*z^2 - 10*y*z*x + 18*y*x^2 + z^3 - z^2*x - z*x^2 + x^3 -- degenerate (Example 2.17 in [Dey1])		
-A = first trivariateDetRep F		
-assert(clean(1e-10, F - det A) == 0)
+M = first detRep F		
+assert(clean(1e-10, F - det M) == 0)
 ///
 
 TEST /// -- Specific threshold tests
@@ -1341,13 +1392,13 @@ assert(orthogonalFromOrthostochastic M === {})
 assert(#orthogonalFromOrthostochastic(M, Tolerance => 1e-4) > 0)
 S = RR[x,y,z]
 l1 = .182627222080409*x+.00411844060723943*y+.677316669916152*z -- y coefficient much smaller
-assert((try trivariateDetRep l1^3) === null)
-A = first trivariateDetRep(l1^3, Tolerance => 1e-4)
+assert((try detRep l1^3) === null)
+A = first detRep(l1^3, Tolerance => 1e-4)
 assert(clean(1e-10, l1^3 - det A) == 0)
 l2 = .000267436534581389*x + .622384659384624*y + .608050635739978*z -- x coefficient much smaller
-assert((try trivariateDetRep l2^3) === null)
-A = first trivariateDetRep(l2^3, Tolerance => 1e-1) -- !!
-assert(clean(1e-10, l2^3 - det A) == 0)
+assert((try detRep l2^3) === null)
+A = first detRep(l2^3, Tolerance => 5e-2) -- !!
+assert(clean(1e-3, l2^3 - det A) == 0)
 ///
 
 TEST /// -- Degenerate cubics
@@ -1389,25 +1440,36 @@ degenCubicList = {
     det(R_0*id_(R^3) + R_1*D233 + R_2*D577) -- non-diagonal
 }
 assert(all(degenCubicList, f -> (
-    reps = trivariateDetRep(f, Tolerance => 1e-4);
+    reps = detRep(f, Tolerance => 1e-4);
     all(reps, A -> clean(1e-3, f - det A) == 0)
 )))
+///
+
+TEST /// -- HyperbolicPt test
+R = RR[x,y,z]
+f = product gens R
+assert((try detRep f) === null)
+e = transpose matrix{{1_RR,1,1}}
+assert(clean(1e-10, f - det first detRep(f, HyperbolicPt => e)) == 0)
+f = (2*x - 3*y)*(4*y + z)*(7*x - 11*z)
+assert((try detRep f) === null)
+setRandomSeed 0
+assert(clean(1e-10, f - det first detRep(f, HyperbolicPt => e)) == 0)
 ///
 
 TEST /// -- Higher degree case
 R=RR[x,y]
 f = x^5+6*x^4*y-2*x^3*y^2-36*x^2*y^3+x*y^4+30*y^5
-A = bivariateDetRep f
-assert(clean(1e-13, f - det A) == 0)
-n = 4
-R = RR[x1,x2]
-f = 24*x1^4+(49680/289)*x1^3*x2+50*x1^3+(123518/289)*x1^2*x2^2+(72507/289)*x1^2*x2+35*x1^2+(124740/289)*x1*x2^3+(112402/289)*x1*x2^2+(32022/289)*x1*x2+10*x1+144*x2^4+180*x2^3+80*x2^2+15*x2+1
-sols = bivariateDetRep f
+M = first detRep f
+assert(clean(1e-13, f - det M) == 0)
+f = 24*x^4+(49680/289)*x^3*y+50*x^3+(123518/289)*x^2*y^2+(72507/289)*x^2*y+35*x^2+(124740/289)*x*y^3+(112402/289)*x*y^2+(32022/289)*x*y+10*x+144*y^4+180*y^3+80*y^2+15*y+1
+sols = detRep f
 assert(all(sols, M -> clean(1e-10, f - det M) == 0))
+n = 4
 A = randomIntegerSymmetric(n, R)
 f = det(id_(R^n) + R_0*diagonalMatrix {4,3,2,1_R} + R_1*A)
 (D1, D2, diag1, diag2) = bivariateDiagEntries f
-sols = bivariateDetRep f;
+sols = detRep f;
 assert(all(sols, M -> clean(1e-6, f - det M) == 0))
 ///
 
@@ -1421,7 +1483,7 @@ assert(#lineSet == 27)
 -- assert(all(subsets(ds#1, 2), s -> not clean(eps, det(s#0 || s#1)) == 0))
 -- assert(all(ds#1, l -> #select(ds#0, m -> clean(eps, det(l || m)) == 0) == 5))
 -- assert(all(6, i -> not clean(eps, det(ds#0#i || ds#1#i)) == 0))
--- M = cubicSurfaceDetRep f
+-- M = detRep f
 -- g1 = M_(0,1)*M_(1,2)*M_(2,0)
 -- g2 = M_(0,2)*M_(1,0)*M_(2,1)
 -- assert(clean(eps, det M - (g1 + g2)) == 0)
@@ -1506,7 +1568,7 @@ check "DeterminantalRepresentations"
 -- Quartic examples
 R = RR[x1,x2]
 f=(1/2)*(x1^4+x2^4-3*x1^2-3*x2^2+x1^2*x2^2)+1
-reps = bivariateDetRep f;
+reps = detRep f;
 time repList = bivariateDetRep(f, Strategy => "Orthogonal", Software => BERTINI) -- SLOW!
 
 f = 24*x1^4+(49680/289)*x1^3*x2+50*x1^3+(123518/289)*x1^2*x2^2+(72507/289)*x1^2*x2+35*x1^2+(124740/289)*x1*x2^3+(112402/289)*x1*x2^2+(32022/289)*x1*x2+10*x1+144*x2^4+180*x2^3+80*x2^2+15*x2+1
@@ -1519,8 +1581,6 @@ f = det(id_(R^n) + x*sub(diagonalMatrix toList(1..n),R) + y*randomIntegerSymmetr
 ----------------------------------------------------
 
 -- To do:
-
--- Cubic surface: check Clebsch example, fix cubicSurfaceDetRep
 
 ----------------------------------------------------
 -- Old code
