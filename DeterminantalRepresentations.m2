@@ -1,7 +1,7 @@
 newPackage("DeterminantalRepresentations",
 	AuxiliaryFiles => false,
-	Version => "1.2.0",
-	Date => "August 16, 2019",
+	Version => "1.3.0",
+	Date => "October 28, 2019",
 	Authors => {
 		{Name => "Justin Chen",
 		Email => "jchen646@gatech.edu"},
@@ -12,22 +12,18 @@ newPackage("DeterminantalRepresentations",
 	HomePage => "https://github.com/papridey/DeterminantalRepresentations",
 	PackageExports => {"NumericalAlgebraicGeometry"},
 	DebuggingMode => false,
-        Reload => true
+        Reload => false
 )
 export {
     "detRep",
-    "quadraticDetRep",
-    "trivariateDetRep",
     "HyperbolicPt",
-    "bivariateDetRep",
     "bivariateDiagEntries",
     "orthogonalFromOrthostochastic",
     "linesOnCubicSurface",
     "doubleSixes",
-    "cubicSurfaceDetRep",
     "generalizedMixedDiscriminant",
     "roundMatrix",
-    "liftRealMatrix",
+    "realPartMatrix",
     "hadamard",
     "coeffMatrices",
     "isOrthogonal",
@@ -73,14 +69,14 @@ quadraticDetRep RingElement := Matrix => opts -> f -> (
         t := if #posEvalues >= 2 then sqrt(posEvectors#1#0)*posEvectors#1#1 else 0*b;
         u := if #posEvalues == 3 then sqrt(posEvectors#2#0)*posEvectors#2#1 else 0*b;
         L := apply(n, i -> matrix{{r_(i,0),t_(i,0) - ii*u_(i,0)},{t_(i,0)+ii*u_(i,0),s_(i,0)}});
-        if not class k === ComplexField then L = L/liftRealMatrix/clean_(opts.Tolerance);
+        if not class k === ComplexField then L = L/realPartMatrix/clean_(opts.Tolerance);
         if k === QQ then L = L/roundMatrix_(ceiling(log_10(1/opts.Tolerance)));
         {id_(R^2) + sum apply(n, i -> R_i*sub(L#i, R))}
     ) else (
         E = clean(opts.Tolerance, eigenvectors(A, Hermitian => true));
         if any(E#0, e -> e > 0) then ( print "No determinantal representation"; return; );
         C := cholesky((-1)*A, opts);
-        if not class k === ComplexField then C = clean(opts.Tolerance, liftRealMatrix C);
+        if not class k === ComplexField then C = clean(opts.Tolerance, realPartMatrix C);
         if k === QQ then C = roundMatrix(ceiling(log_10(1/opts.Tolerance)), C);
         {(id_(R^n) | transpose C*transpose vars R) || ((vars R*C) | matrix{{1+(vars R)*b}})}
     )
@@ -107,7 +103,7 @@ cubicBivariateDetRep RingElement := List => opts -> f -> (
     if not clean(eps, q11 - (diag1#0-D1#2-q21*(D1#1-D1#2))/(D1#0-D1#2)) == 0 then print "Not compatible";
     Q := clean(eps, matrix{{q11,q12,1-q12-q11},{q21,q22,1-q21-q22},{1-q11-q21,1-q12-q22,1-(1-q11-q12)-(1-q21-q22)}});
     oEq := ((q11-1)*(q22-1) + (q21-1)*(q12-1) - 1)^2 - 4*q11*q22*q12*q21;
-    L0 := apply(if clean(eps, oEq) == 0 then {0} else eigenvalues companionMatrix oEq, r -> liftRealMatrix sub(Q, S_0=>r));
+    L0 := apply(if clean(eps, oEq) == 0 then {0} else eigenvalues companionMatrix oEq, r -> realPartMatrix sub(Q, S_0=>r));
     L := flatten apply(select(clean(eps, L0), isDoublyStochastic), M -> orthogonalFromOrthostochastic(M, opts));
     if k === QQ then (
         numDigits := ceiling(-log_10(eps));
@@ -145,7 +141,7 @@ bivariateDetRep RingElement := List => opts -> f -> (
         g := sub(f, x => 1);
         Z := toList(d-(first degree g):0) | apply(eigenvalues companionMatrix g, r -> -1/r);
         if not all(Z, z -> clean(eps, z - realPart z) == 0) then error "Not a real zero polynomial";
-        return {(x*id_(R^d) + y*sub(liftRealMatrix diagonalMatrix Z, R))};
+        return {(x*id_(R^d) + y*sub(realPartMatrix diagonalMatrix Z, R))};
     );
     (D1, D2, diag1, diag2) := bivariateDiagEntries(f, Tolerance => eps);
     y = getSymbol "y";
@@ -206,10 +202,10 @@ bivariateDiagEntries RingElement := Sequence => opts -> f -> ( -- returns diagon
     ));
     (D1, D2) = (D1/realPart, D2/realPart);
     if #uniqueUpToTol(D1, opts) == 1 or #uniqueUpToTol(D2, opts) == 1 then return (D1, D2, {}, {})/(L -> transpose matrix{L});
-    C1 := liftRealMatrix sub(last coefficients(f, Monomials=>apply(d, i -> V#0*V#1^i)),k);
+    C1 := realPartMatrix sub(last coefficients(f, Monomials=>apply(d, i -> V#0*V#1^i)),k);
     G1 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D2_s))), RR);
     diag1 := addScaleToMajorize(flatten entries solve(G1, sub(C1, RR), ClosestFit => true), D1, G1, opts);
-    C2 := liftRealMatrix sub(last coefficients(f, Monomials=>apply(d, i -> V#0^i*V#1)),k);
+    C2 := realPartMatrix sub(last coefficients(f, Monomials=>apply(d, i -> V#0^i*V#1)),k);
     G2 := sub(matrix table(d,d,(i,j) -> sum apply(subsets(toList(0..<d)-set{j},i), s -> product(D1_s))), RR);
     diag2 := addScaleToMajorize(flatten entries solve(G2, sub(C2, RR), ClosestFit => true), D2, G2, opts);
     (D1, D2, diag1, diag2)/(L -> transpose matrix{L})
@@ -245,7 +241,7 @@ trivariateDetRep RingElement := List => opts -> f -> (
     if #V > 3 or not isHomogeneous f then error "Expected a homogeneous polynomial in 3 variables";
     (k, d, x) := (coefficientRing ring f, first degree f, V#0);
     (e, eps) := (opts.HyperbolicPt, opts.Tolerance);
-    A := if e =!= null then sub(liftRealMatrix(e | random(k^3,k^2)), k) else id_(k^3);
+    A := if e =!= null then sub(realPartMatrix(e | random(k^3,k^2)), k) else id_(k^3);
     F := sub(f, matrix{V}*A);
     c := last coefficients(F, Monomials => {x^d});
     if c == 0 then error "Expected polynomial to be hyperbolic with respect to (1,0,0). Try specifying a point with the option HyperbolicPt";
@@ -362,8 +358,8 @@ round (ZZ,ZZ) := (n,x) -> x
 roundMatrix = method() -- only accepts real matrices
 roundMatrix (ZZ, Matrix) := Matrix => (n, A) -> matrix apply(entries A, r -> r/(e -> (round(n,0.0+e))^QQ))
 
-liftRealMatrix = method()
-liftRealMatrix Matrix := Matrix => A -> matrix apply(entries A, r -> r/realPart)
+realPartMatrix = method()
+realPartMatrix Matrix := Matrix => A -> matrix apply(entries A, r -> r/realPart)
 
 approxKer = method(Options => options quadraticDetRep)
 approxKer Matrix := Matrix => opts -> A -> (
@@ -480,8 +476,8 @@ doc ///
     	computing determinantal representations of polynomials
     Description
     	Text
-	    The goal of this package is to compute determinantal representations of
-            polynomials. To be precise, a polynomial $f$ in $\mathbb{R}[x_1, \ldots, x_n]$ 
+	    The goal of this package is to compute symmetric determinantal representations of
+            real polynomials. A polynomial $f$ in $\mathbb{R}[x_1, \ldots, x_n]$ 
             of total degree $d$ (not necessarily homogeneous) is called determinantal if $f$
             is the determinant of a matrix of linear forms - in other words, there exist
             matrices $A_0, \ldots, A_n\in \mathbb{R}^{d\times d}$ such that 
@@ -502,7 +498,7 @@ doc ///
             
             Currently, the functions in this package are geared towards computing monic
             symmetric determinantal representations of quadrics, as well as plane curves of
-            low degree (i.e. cubics and quartics). The algorithms implemented in this 
+            low degree (i.e., cubics and quartics). The algorithms implemented in this 
             package can be found in [1], [2].
             
             Additionally, a number of helper functions are included for creating/working
@@ -516,8 +512,8 @@ doc ///
             {\bf References}:
         Code
             UL {
-                "[1] Dey, P., Definite Determinantal Representations via Orthostochastic Matrices", 
-                "[2] Dey, P., Definite Determinantal Representations of Multivariate Polynomials"
+                HREF {"http://arxiv.org/abs/1708.09559", "[1] Dey, P., Definite Determinantal Representations via Orthostochastic Matrices, arXiv:1708.09559"}, 
+                HREF {"http://arxiv.org/abs/1708.09557", "[2] Dey, P., Definite Determinantal Representations of Multivariate Polynomials, arXiv:1708.09557"}
             }
             
 ///
@@ -548,21 +544,17 @@ doc ///
             and the correct algorithm will be automatically applied. For details on each case,
             see the pages below.
     SeeAlso
-        quadraticDetRep
-        bivariateDetRep
-        trivariateDetRep
+        "Determinantal representations of quadrics"
+        "Determinantal representations of bivariate polynomials"
+        "Determinantal representations of hyperbolic plane cubics"
 ///
 
 doc ///
     Key
-        quadraticDetRep
-        (quadraticDetRep, RingElement)
-        [quadraticDetRep, Tolerance]
-    Headline
-        computes determinantal representation of a quadric
+        "Determinantal representations of quadrics"
     Usage
-        quadraticDetRep f
-        quadraticDetRep(f, Tolerance => 1e-6)
+        detRep f
+        detRep(f, Tolerance => 1e-6)
     Inputs
         f:RingElement
             a quadric with real coefficients
@@ -571,9 +563,9 @@ doc ///
             giving a determinantal representation of $f$
     Description
         Text
-            This method computes a monic symmetric determinantal representation of a 
-            real quadric $f$ (in any number of variables), or returns false if no such
-            representation exists.
+            This page demonstrates how the method @TO detRep@ computes a monic 
+            symmetric determinantal representation of a real quadric $f$ (in any number of 
+            variables), or returns false if no such representation exists.
             
             If a quadratic determinantal representation of size $2$ exists, then it is 
             returned. Otherwise, the method will find a determinantal representation of size
@@ -588,11 +580,13 @@ doc ///
         Example
             R = RR[x1, x2, x3, x4]
             f = 260*x1^2+180*x1*x2-25*x2^2-140*x1*x3-170*x2*x3-121*x3^2+248*x1*x4+94*x2*x4-142*x3*x4+35*x4^2+36*x1+18*x2+2*x3+20*x4+1
-            A = first quadraticDetRep f
+            A = first detRep f
             clean(1e-10, f - det A)
             g = -61*x1^2-96*x1*x2-177*x2^2-126*x1*x3-202*x2*x3-86*x3^2-94*x1*x4-190*x2*x4-140*x3*x4-67*x4^2+8*x1+3*x2+5*x3+3*x4+1
-            B = first quadraticDetRep g
+            B = first detRep g
             clean(1e-10, g - det B)
+    SeeAlso
+        detRep
 ///
 
 doc ///
@@ -632,49 +626,33 @@ doc ///
             f = 15*x1^2 + 20*x1*x2 - 36*x2^2 + 20*x1 + 16*x2 + 1
             bivariateDiagEntries f
     SeeAlso
-        bivariateDetRep
-        trivariateDetRep
+        detRep
+        "Determinantal representations of bivariate polynomials"
+        "Determinantal representations of hyperbolic plane cubics"
 ///
 
 doc ///
     Key
-        bivariateDetRep
-        (bivariateDetRep, RingElement)
-        [bivariateDetRep, Tolerance]
-        [bivariateDetRep, Software]
-        [bivariateDetRep, Strategy]
-        [trivariateDetRep, Software]
+        "Determinantal representations of bivariate polynomials"
         [detRep, Software]
-    Headline
-        computes determinantal representations of a bivariate polynomial numerically
-    Usage
-        bivariateDetRep f
-        bivariateDetRep(f, Tolerance => 1e-6)
-        bivariateDetRep(f, Strategy => "DirectSystem")
-    Inputs
-        f:RingElement
-            a bivariate polynomial with real coefficients
-    Outputs
-        :List
-            of matrices, each giving a determinantal representation of $f$
     Description
         Text
-            This method implements various strategies to compute a monic symmetric 
-            determinantal representation of a bivariate polynomial, if 
-            such a representation exists. 
+            This page demonstrates how the method @TO detRep@ computes a 
+            monic symmetric determinantal representation of a bivariate polynomial, 
+            if such a representation exists. 
             
             First, if the polynomial $f$ is homogeneous, then over 
             @TO CC@, $f$ splits as a product of linear forms, and it 
-            admits a real symmetric determinantal representation iff
+            admits a real symmetric determinantal representation if and only if
             all the linear factors are defined over @TO RR@. If
             this is the case, this method returns the diagonal matrix
-            of linear factors of $f$, which is a determinantal
+            of linear factors of $f$, which is a symmetric determinantal
             representation:
             
         Example
             R = RR[x,y]
-            bivariateDetRep(x^2 - 3*y^2)
-            bivariateDetRep(x^5+6*x^4*y-2*x^3*y^2-36*x^2*y^3+x*y^4+30*y^5)
+            detRep(x^2 - 3*y^2)
+            detRep(x^5+6*x^4*y-2*x^3*y^2-36*x^2*y^3+x*y^4+30*y^5)
         
         Text
             Here it is assumed that the dehomogenization of $f$ (with
@@ -708,50 +686,37 @@ doc ///
             is treated as numerically zero).
             The option @TO Software@ specifies the numerical algebraic
             geometry software used to perform a numerical irreducible decomposition: by
-            default, the native M2engine is used, although other valid options include
-            BERTINI and PHCPACK (if the user has these installed on their system).
+            default, the native routines provided by Macaulay2 are used, although other 
+            valid options include BERTINI and PHCPACK (if the user has these installed 
+            on their system).
         
         Example
             R = RR[x1, x2]
             f=(1/2)*(x1^4+x2^4-3*x1^2-3*x2^2+x1^2*x2^2)+1
-            repList = bivariateDetRep f;
+            repList = detRep f;
             #repList
             repList#0
             all(repList, A -> clean(1e-10, f - det A) == 0)
     Caveat
         As this algorithm implements relatively brute-force algorithms, it may not 
         terminate for non-homogeneous polynomials of large degree 
-        (e.g. degree >= 5).
+        (e.g., degree >= 5).
     SeeAlso
+        detRep
         bivariateDiagEntries
 ///
 
 doc ///
     Key
-        trivariateDetRep
-        (trivariateDetRep, RingElement)
-        [trivariateDetRep, Tolerance]
+        "Determinantal representations of hyperbolic plane cubics"
         HyperbolicPt
-        [trivariateDetRep, HyperbolicPt]
         [detRep, HyperbolicPt]
-    Headline
-        computes determinantal representations of a hyperbolic polynomial in 3 variables
-    Usage
-        trivariateDetRep f
-        trivariateDetRep(f, Tolerance => 1e-6)
-        trivariateDetRep(f, HyperbolicPt => matrix{{1_RR},{1},{1}})
-    Inputs
-        f:RingElement
-            a hyperbolic polynomial defining a real projective plane curve
-    Outputs
-        :List
-            of matrices, each giving a determinantal representation of $f$
     Description
         Text
-            This method computes monic symmetric determinantal representations of a 
-            hyperbolic polynomial $f$ in $3$ variables, or gives an error if certain necessary 
-            conditions for existence of such a representation are not met. First, the
-            polynomial is dehomogenized to obtain a bivariate polynomial. Next, if 
+            This page demonstrates how the method @TO detRep@ computes monic symmetric
+            determinantal representations of a hyperbolic cubic $f$ in $3$ variables, or gives 
+            an error if certain necessary conditions for existence of such a representation are not 
+            met. First, the polynomial is dehomogenized to obtain a bivariate polynomial. Next, if 
             $f = det(I + x_1A_1 + x_2A_2)$ is a symmetric determinantal representation, 
             then by suitable conjugation one may assume $A_1 = D_1$ is a diagonal matrix.
             Since $A_2$ is symmetric, there exists an orthogonal change-of-basis matrix 
@@ -783,15 +748,16 @@ doc ///
         Example
             R = RR[x1, x2, x3]
             f = 6*x1^3+36*x1^2*x2+66*x1*x2^2+36*x2^3+11*x1^2*x3+42*x1*x2*x3+36*x2^2*x3+6*x1*x3^2+11*x2*x3^2+x3^3
-            repList = trivariateDetRep f
+            repList = detRep f
             all(repList, A -> clean(1e-10, f - det A) == 0)
             g = product gens R -- hyperbolic with respect to (1,1,1)
-            B = clean(1e-6, first trivariateDetRep(g, HyperbolicPt => matrix{{1_RR},{1},{1}}))
+            B = clean(1e-6, first detRep(g, HyperbolicPt => matrix{{1_RR},{1},{1}}))
             clean(1e-6, g - det B)
     SeeAlso
+        detRep
         bivariateDiagEntries
         orthogonalFromOrthostochastic
-        bivariateDetRep
+        "Determinantal representations of bivariate polynomials"
 ///
 
 doc ///
@@ -814,7 +780,7 @@ doc ///
         Text
             This method computes orthogonal matrices whose Hadamard square is a 
             given orthostochastic matrix. This is a helper function to 
-            @TO trivariateDetRep@, which computes symmetric
+            @TO detRep@, which computes symmetric
             determinantal representations of real cubic bivariate polynomials. 
             
             Given a $n\times n$ orthostochastic matrix $A$, there are $2^{n^2}$ possible
@@ -824,8 +790,9 @@ doc ///
             $(g_1, g_2) O = g_1Og_2$) on the set of orthogonal matrices whose
             Hadamard square is $A$. This method computes all such orthogonal matrices,
             modulo the action of $G\times G$. The representative for each orbit is chosen 
-            so that the first row and column will have all nonnegative entries. Note that for
-            generic choices of the orthostochastic matrix $A$, there will be exactly one 
+            so that the first row and column will have all nonnegative entries, and modulo this 
+            restriction on the signs, the algorithm is essentially a brute-force search. Note that 
+            for generic choices of the orthostochastic matrix $A$, there will be exactly one 
             $G\times G$-orbit of orthogonal matrices with Hadamard square equal to $A$.
             
             When working over an @TO InexactFieldFamily@ like @TO RR@ or 
@@ -838,7 +805,7 @@ doc ///
             A = hadamard(O, O)
             orthogonalFromOrthostochastic A
     SeeAlso
-        trivariateDetRep
+        detRep
 ///
 
 doc ///
@@ -862,7 +829,7 @@ doc ///
             for the coefficients of a determinantal polynomial, which are polynomial in 
             the entries of the representing matrices. Thus, computing determinantal
             representations can be viewed as solving a system of specializations of 
-            generalized mixed discriminants, i.e. recovering a set of matrices from 
+            generalized mixed discriminants, i.e., recovering a set of matrices from 
             its generalized mixed discriminants.
                  
         Example
@@ -893,7 +860,7 @@ doc ///
             whether $A$ is a doubly stochastic matrix
     Description
         Text
-            This method determines whether a given matrix is doubly stochastic, i.e. is 
+            This method determines whether a given matrix is doubly stochastic, i.e., is 
             a real square matrix with all entries nonnegative and all row and column sums
             equal to $1$. 
             
@@ -924,7 +891,7 @@ doc ///
             whether $A$ is orthogonal
     Description
         Text
-            This method determines whether a given matrix is orthogonal, i.e. has 
+            This method determines whether a given matrix is orthogonal, i.e., has 
             inverse equal to its transpose. 
             
             When working over an @TO InexactFieldFamily@ like @TO RR@ or 
@@ -965,7 +932,7 @@ doc ///
             The orthogonal matrix is constructed via Cayley's correspondence,
             which gives a bijection between skew-symmetric matrices, and 
             orthogonal matrices $O$ which do not have $1$ as an eigenvalue
-            (i.e. $O - I$ is invertible). Up to changing signs of rows, any orthogonal 
+            (i.e., $O - I$ is invertible). Up to changing signs of rows, any orthogonal 
             matrix can be obtained this way: if $G\cong (\ZZ/2\ZZ)^n$ 
             is the group of diagonal matrices with diagonal entries equal to 
             &plusmn;1, acting on $n\times n$ matrices by left multiplication, then 
@@ -1164,7 +1131,7 @@ doc ///
         Text
             This method computes the Hadamard product of two matrices $A, B$ of the
             same size. The Hadamard product is defined as the componentwise product, 
-            i.e. if $A, B$ are $m\times n$ matrices, then the Hadamard product is the 
+            i.e., if $A, B$ are $m\times n$ matrices, then the Hadamard product is the 
             $m\times n$ matrix with $(i,j)$ entry equal to $A_{i,j}*B_{i,j}$.
                  
         Example
@@ -1239,12 +1206,12 @@ doc ///
 
 doc ///
     Key
-        liftRealMatrix
-        (liftRealMatrix, Matrix)
+        realPartMatrix
+        (realPartMatrix, Matrix)
     Headline
-        lifts matrix over CC to matrix over RR
+        real part of a matrix over CC
     Usage
-        liftRealMatrix A
+        realPartMatrix A
     Inputs
         A:Matrix
             with complex entries
@@ -1253,29 +1220,29 @@ doc ///
             the real matrix whose entries are real parts of entries of A
     Description
         Text
-            This method converts a complex matrix to a real matrix, by taking the real 
-            part of each entry. It leaves matrices over @TO RR@ and @TO QQ@
+            Given a complex matrix, this method returns a real matrix obtained by taking 
+            the real part of each entry. It leaves matrices over @TO RR@ and @TO QQ@
             unchanged.
                  
         Example
             A = random(RR^3,RR^5)
-            A == liftRealMatrix A
+            A == realPartMatrix A
             B = sub(A, CC)
-            C = liftRealMatrix B
+            C = realPartMatrix B
             clean(1e-10, A - C) == 0
             D = random(QQ^3, QQ^1)
-            D == liftRealMatrix D
+            D == realPartMatrix D
             
         Text
             If the matrix is over a polynomial ring, but has entries defined over the base
-            field (e.g. when taking @TO coefficients@), then it is necessary to @TO sub@
+            field (e.g., when taking @TO coefficients@), then it is necessary to @TO sub@
             into the base field first:
             
         Example
             R = CC[x,y]
             f = random(2,R)
             C = last coefficients f
-            liftRealMatrix sub(C, coefficientRing R)
+            realPartMatrix sub(C, coefficientRing R)
     SeeAlso
         roundMatrix
 ///
@@ -1305,7 +1272,7 @@ doc ///
             A = matrix{{1, 2.5, -13/17}, {2*pi, 4.7, sqrt(2)}}
             roundMatrix(5, A)
     SeeAlso
-        liftRealMatrix
+        realPartMatrix
 ///
 
 undocumented {
@@ -1500,7 +1467,7 @@ R = CC[x,y,z,w]
 f = 81*(x^3 + y^3 + z^3) - 189*(x^2*y + x^2*z + x*y^2 + x*z^2 + y^2*z + y*z^2) + 54*x*y*z + 126*w*(x*y + x*z + y*z) - 9*w*(x^2 + y^2 + z^2) - 9*w^2*(x+y+z) + w^3
 elapsedTime lineSet = linesOnCubicSurface(f, Tolerance => eps)
 assert(#lineSet == 27)
-assert(all(lineSet, m -> clean(eps, m - liftRealMatrix m) == 0)) -- all real lines
+assert(all(lineSet, m -> clean(eps, m - realPartMatrix m) == 0)) -- all real lines
 ///
 
 TEST /// -- Generalized mixed discriminant
